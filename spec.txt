@@ -112,6 +112,14 @@ and 'BNOT(a)' the bitwise complement. The interpretation of sign and bit
 width for these operations is implementation-defined but must be consistent
 across all bitwise operators.
 
+Bitfield and slicing helpers: 'SLICE(a, hi, lo)' extracts the inclusive
+bit-range [hi:lo] from the binary representation of 'a' and returns it as an
+unsigned integer. Bits are numbered starting at 0 for the least-significant
+bit. If 'hi < lo' or either index is negative, the operation raises a
+runtime error. For negative values of 'a', implementations use the low-order
+bits of its two's-complement representation (consistent with other bitwise
+operations).
+
 Arithmetic operators include 'ADD(a, b)' for integer addition, 'SUB(a, b)'
 for subtraction ('a - b'), and 'MUL(a, b)' for multiplication. 'DIV(a, b)'
 performs integer division with floor rounding, returning '⌊a / b⌋'; division
@@ -176,6 +184,14 @@ log for deterministic replay.
 'ASSERT(a)' checks that its argument is true in the Boolean sense. If 'a' is
 non-zero, execution proceeds normally; if 'a' is '0', the program crashes
 with an assertion failure.
+
+Program termination is exposed via 'EXIT'. 'EXIT()' or 'EXIT(code)' requests
+immediate termination of the interpreter. If an integer 'code' is supplied,
+it is used as the interpreter's process exit code; otherwise '0' is used.
+Execution stops immediately when 'EXIT' is executed (no further statements
+run), and an entry is recorded in the state log to make deterministic replay
+possible. Using 'EXIT' inside a function terminates the entire program (not
+just the function).
 
 Memory-management and function-return behavior are also exposed via
 operators. 'DEL(x)' deletes the variable 'x' from the current environment,
@@ -546,6 +562,7 @@ Function / Operator Signatures (expression position)
 - 'PRINT(a1, a2, ..., aN)' : prints arguments (side-effect), return value discarded
 - 'ASSERT(a)' : crashes if 'a' is 0
 - 'DEL(x)' : delete variable 'x' from environment
+- 'EXIT()' or 'EXIT(code)' : terminate program immediately with optional exit code (default 0)
 
 Arithmetic
 - 'ADD(a, b)' : a + b
@@ -565,6 +582,7 @@ Bitwise / Boolean
 - 'BOR(a, b)' : bitwise OR
 - 'BXOR(a, b)' : bitwise XOR
 - 'BNOT(a)' : bitwise complement
+ - 'SLICE(a, hi, lo)' : inclusive bit-slice of `a` from bit index `hi` down to `lo` (LSB index 0)
 - 'AND(a, b)' : Boolean AND -> 0 or 1
 - 'OR(a, b)' : Boolean OR -> 0 or 1
 - 'XOR(a, b)' : Boolean XOR -> 0 or 1

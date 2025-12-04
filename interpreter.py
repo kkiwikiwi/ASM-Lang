@@ -28,6 +28,10 @@ class ReturnSignal(Exception):
     def __init__(self, value: int) -> None:
         super().__init__(value)
         self.value = value
+class ExitSignal(Exception):
+    def __init__(self, code: int = 0) -> None:
+        super().__init__(code)
+        self.code = code
 @dataclass
 class SourceLocation:
     file: str
@@ -110,9 +114,18 @@ class Lexer:
         token_type:str = value if value in KEYWORDS else "IDENT"
         return(Token(token_type,value,line,col))
     def _is_identifier_start(self, ch: str) -> bool:
-        return(ch.isalpha() or ch == "_")
+        # Only allow ASCII letters and underscore as the start of an identifier.
+        # This enforces the spec requirement that identifiers must be ASCII-only.
+        return (ch == "_") or ("A" <= ch <= "Z") or ("a" <= ch <= "z")
     def _is_identifier_part(self, ch: str) -> bool:
-        return(ch.isalpha() or ch == "_" or (ch.isdigit() and ch not in "01"))
+        # Allow ASCII letters, underscore, and digits 2-9 (digits '0' and '1' are disallowed
+        # per the language spec because they would collide with binary-literal syntax).
+        return (
+            (ch == "_")
+            or ("A" <= ch <= "Z")
+            or ("a" <= ch <= "z")
+            or ("2" <= ch <= "9")
+        )
     @property
     def _eof(self) -> bool:
         return(self.index >= len(self.text))
@@ -444,6 +457,11 @@ class Builtins:
         self._register_fixed("BOR", 2, lambda a, b: a | b)
         self._register_fixed("BXOR", 2, lambda a, b: a ^ b)
         self._register_fixed("BNOT", 1, lambda a: ~a)
+        # Return the inclusive bit-slice [hi:lo] of `a` as an unsigned integer.
+        # Bits are numbered starting at 0 for the least-significant bit.
+        # Implementation note: uses masking so negative values yield their
+        # two's-complement low bits (consistent with other bitwise ops).
+        self._register_fixed("SLICE", 3, self._slice)
         self._register_fixed("AND", 2, lambda a, b: 1 if (_as_bool(a) and _as_bool(b)) else 0)
         self._register_fixed("OR", 2, lambda a, b: 1 if (_as_bool(a) or _as_bool(b)) else 0)
         self._register_fixed("XOR", 2, lambda a, b: 1 if (_as_bool(a) ^ _as_bool(b)) else 0)
@@ -466,6 +484,7 @@ class Builtins:
         self._register_custom("PRINT", 0, None, self._print)
         self._register_custom("ASSERT", 1, 1, self._assert)
         self._register_custom("DEL", 1, 1, self._delete)
+        self._register_custom("EXIT", 0, 1, self._exit)
     def _register_fixed(self, name: str, arity: int, func: Callable[..., int]) -> None:
         def impl(interpreter: "Interpreter", args: List[int], _: List[Expression], __: Environment, ___: SourceLocation) -> int:
             return func(*args)
@@ -503,10 +522,13 @@ class Builtins:
     def _safe_ceil(self, a: int, b: int) -> int:
         if b == 0:
             raise ASMRuntimeError("Division by zero", rewrite_rule="CEIL")
-        q, r = divmod(a, b)
-        if r == 0:
+        # Compute ceil(a / b) using integer operations only.
+        # Use Python's floor division to get the floor quotient `q`.
+        q = a // b
+        # If remainder is zero then the division is exact; otherwise ceil is q+1.
+        if a % b == 0:
             return q
-        return q + 1 if (a > 0) == (b > 0) else q
+        return q + 1
     def _safe_mod(self, a: int, b: int) -> int:
         if b == 0:
             raise ASMRuntimeError("Division by zero", rewrite_rule="MOD")
@@ -534,6 +556,18 @@ class Builtins:
         if value & (value - 1) == 0:
             return value.bit_length() - 1
         return value.bit_length()
+
+    def _slice(self, a: int, hi: int, lo: int) -> int:
+        if hi < lo:
+            raise ASMRuntimeError("SLICE: hi must be >= lo", rewrite_rule="SLICE")
+        if lo < 0 or hi < 0:
+            raise ASMRuntimeError("SLICE: bit indices must be non-negative", rewrite_rule="SLICE")
+        width = hi - lo + 1
+        if width <= 0:
+            return 0
+        # mask off low (hi+1) bits, then shift down by lo
+        mask = (1 << (hi + 1)) - 1
+        return (a & mask) >> lo
     def _input(
         self,
         interpreter: "Interpreter",
@@ -589,6 +623,17 @@ class Builtins:
             err.location = location
             raise
         return 0
+    def _exit(
+        self,
+        interpreter: "Interpreter",
+        args: List[int],
+        __: List[Expression],
+        ___: Environment,
+        ____: SourceLocation,
+    ) -> int:
+        code = args[0] if args else 0
+        interpreter.io_log.append({"event": "EXIT", "code": code})
+        raise ExitSignal(code)
 class Interpreter:
     def __init__(
         self,
@@ -851,6 +896,8 @@ def run_cli(argv: Optional[List[str]] = None) -> int:
     except ASMParseError as error:
         print(f"ParseError: {error}", file=sys.stderr)
         return 1
+    except ExitSignal as sig:
+        return sig.code
     except ASMRuntimeError as error:
         formatter = TracebackFormatter(interpreter)
         print(formatter.format_text(error, verbose=args.verbose), file=sys.stderr)
