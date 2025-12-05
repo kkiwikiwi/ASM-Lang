@@ -10,12 +10,6 @@ state-transition (rewrite) function. All intermediate states are
 exactly, including I/O and nondeterministic choices, which are modeled
 explicitly for deterministic replay.
 
-Note: Builds should not refer to this language by any proper name,
-as none has been specified yet. If a name is needed
-(e.g. for a filename), use ASM-Lang (Abstract State Machine Language) as a
-placeholder.
-
-
 1. Overview
 -----------
 
@@ -58,6 +52,12 @@ function names (Section 2.5); keywords and built-ins (control-flow
 keywords, built-in operators and functions; see Sections 4 and 5); and
 delimiters, namely '(', ')', '[', ']', '{', '}', ',', and '='.
 
+The character '-' is not an operator token. It is permitted only as the
+leading sign of a binary integer literal (Section 3.1). If '-' appears
+anywhere else, the lexer must raise a syntax error. When '-' starts a
+literal, any spaces, horizontal tabs, or carriage returns between the '-'
+and the first digit are ignored and the literal is treated as negative.
+
 Identifiers denote variables and user-defined functions. They must be
 non-empty and case-sensitive. An identifier must not contain non-ASCII
 characters, nor any of the following characters: '{', '}', '[', ']', '(',
@@ -71,10 +71,13 @@ with the name of any built-in operator or function (see Section 4.1).
 -------------
 
 The sole literal data type is the binary integer. A binary integer literal is
-a non-empty sequence of characters drawn from the set '{0,1}' (for example,
-'0', '1', '1011', '100110'). There is no syntactic sign ('+' or '-') for
-literals; sign, if modeled, is an implementation detail (such as two’s
-complement) and does not affect the syntax.
+either (1) an unsigned non-empty sequence of characters drawn from the set
+'{0,1}' (for example, '0', '1', '1011', '100110'), or (2) a signed literal
+formed by a leading '-' followed by optional whitespace (spaces, horizontal
+tabs, or carriage returns) and then a non-empty sequence of '{0,1}'. The '-'
+is part of the literal spelling and is not an operator; it may only appear in
+this leading position. A '-' that is not immediately introducing a literal is
+a syntax error.
 
 Every runtime value is a mathematical integer. The language does not support
 fractional or real-valued numbers. All operations that would otherwise
@@ -174,6 +177,17 @@ position, and any return value is discarded. The effect on the external
 world is recorded in the execution log, ensuring that replay remains
 deterministic.
 
+'IMPORT(name)' loads and executes another source file inside the caller's
+namespace. The argument must be an identifier naming a module; the
+interpreter looks for a file named '<name>.asmln' in the same directory as
+the current source file. When the current source is provided via the
+'-source' string literal mode, the search directory is the process's current
+working directory. The imported file is parsed and run as if its top-level
+statements appeared inline at the call site: assignments affect the caller's
+environment, and any functions defined in the imported module become
+available to the caller. Each 'IMPORT' call executes the target module anew;
+there is no automatic caching or cycle detection.
+
 'INPUT()' (or simply 'INPUT' in expression position) reads a value from the
 console or input stream. If the incoming text is empty, the result is '0'.
 If the text consists solely of the characters '0' and '1', it is interpreted
@@ -184,6 +198,12 @@ log for deterministic replay.
 'ASSERT(a)' checks that its argument is true in the Boolean sense. If 'a' is
 non-zero, execution proceeds normally; if 'a' is '0', the program crashes
 with an assertion failure.
+
+'MAIN()' returns '1' when the call site belongs to the primary program file
+(the file passed as the interpreter's first argument, or '<string>' when
+'-source' is used). It returns '0' when executed from code that came from an
+'IMPORT' (including nested imports). The result is determined solely by the
+source file that contains the call expression, not by the caller's call stack.
 
 Program termination is exposed via 'EXIT'. 'EXIT()' or 'EXIT(code)' requests
 immediate termination of the interpreter. If an integer 'code' is supplied,
@@ -550,6 +570,54 @@ full `rewrite_record` describing the DIV operation that failed.
   - File mode: `interpreter program.asm`
   - Source-string mode: `interpreter -source "foo = INPUT\nPRINT(foo)" -verbose`
 
+  - REPL / Interactive mode: `interpreter` (no program argument)
+
+REPL (Interactive Mode)
+-----------------------
+
+When the interpreter is invoked without a program path or a `-source` string
+argument it enters an interactive read–eval–print loop (REPL). The REPL is a
+convenient development and exploration environment that executes ASM-Lang
+statements using the same parser, runtime, built-ins, and state-logging
+semantics as file-mode execution. The following rules describe REPL
+behaviour:
+
+- Invocation: running `interpreter` with no positional `program` argument
+  launches the REPL. The `-verbose` and `--traceback-json` flags keep the
+  same meanings in the REPL as in batch mode.
+- Prompting and input: the REPL presents a primary prompt for new top-level
+  input and a continuation prompt while the user is entering a multi-line
+  block (for example, the body of `FUNC`, `IF`, `WHILE`, or `FOR`).
+- Single-line execution: when the user enters a single complete top-level
+  statement (for example `x = 1010` or `PRINT(x)`), the REPL parses and
+  executes that statement immediately and prints any side-effect output.
+  This means `EXIT()` typed as a single-line statement will terminate the
+  REPL immediately and return the supplied exit code (or `0` if omitted),
+  identical to the behaviour when `EXIT()` is executed in a file.
+- Multi-line buffering: if a statement begins a block (for example a `FUNC`
+  definition or an `IF(...)[` that spans multiple lines), the REPL buffers
+  lines until the block is complete (a blank line may be used to indicate
+  end-of-entry when appropriate). When the buffer is complete the REPL
+  parses and executes the collected statements as a unit.
+- Environment persistence: variables, function definitions, and the state
+  logger persist for the duration of the REPL session (that is, top-level
+  bindings remain available across successive inputs until explicitly
+  deleted with `DEL(name)`). This lets the user incrementally build up a
+  program interactively.
+- Deterministic logging and tracebacks: all REPL-executed statements are
+  recorded in the same state log format used for file-mode execution. Errors
+  produce tracebacks in the same concise and verbose modes; the `-verbose`
+  flag causes the REPL to attach `env_snapshot` entries in tracebacks when
+  available.
+
+Notes and examples:
+- Start REPL: `interpreter`
+- Exit via meta-command: type `.exit` or press Ctrl-D (EOF)
+- Exit programmatically: `EXIT()` — this immediately terminates the
+  interpreter and returns the specified exit code to the shell, just like in
+  batch execution.
+
+
 APIREF — Quick Reference
 ------------------------
 
@@ -561,8 +629,11 @@ Function / Operator Signatures (expression position)
 - 'INPUT()' or 'INPUT' : returns integer from input stream (0 for empty)
 - 'PRINT(a1, a2, ..., aN)' : prints arguments (side-effect), return value discarded
 - 'ASSERT(a)' : crashes if 'a' is 0
+- 'MAIN()' : 1 if executing in the primary program file, else 0 when in imported code
 - 'DEL(x)' : delete variable 'x' from environment
 - 'EXIT()' or 'EXIT(code)' : terminate program immediately with optional exit code (default 0)
+- 'IMPORT(name)' : load and execute '<name>.asmln' beside the caller, sharing the caller's namespace
+- Binary literal: optional leading '-' (spaces/tabs/CR allowed after the dash) then '{0,1}+'
 
 Arithmetic
 - 'ADD(a, b)' : a + b

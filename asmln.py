@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -83,8 +84,11 @@ class Lexer:
                 tokens.append(Token(SYMBOLS[ch],ch,self.line,self.column))
                 self._advance()
                 continue
+            if(ch == "-"):
+                tokens.append(self._consume_signed_number())
+                continue
             if(ch in "01"):
-                tokens.append(self._consume_number())
+                tokens.append(self._consume_unsigned_number())
                 continue
             if(self._is_identifier_start(ch)):
                 tokens.append(self._consume_identifier())
@@ -95,13 +99,27 @@ class Lexer:
     def _consume_comment(self) -> None:
         while(not self._eof and self._peek() != "\n"):
             self._advance()
-    def _consume_number(self) -> Token:
+    def _consume_unsigned_number(self) -> Token:
         line, col = self.line, self.column
+        digits = self._consume_binary_digits()
+        return(Token("NUMBER",digits,line,col))
+
+    def _consume_signed_number(self) -> Token:
+        line, col = self.line, self.column
+        self._advance()  # consume '-'
+        while(not self._eof and self._peek() in " \t\r"):
+            self._advance()
+        if(self._eof or self._peek() not in "01"):
+            raise ASMParseError(f"Expected binary digits after '-' at {self.filename}:{line}:{col}")
+        digits = self._consume_binary_digits()
+        return(Token("NUMBER","-" + digits,line,col))
+
+    def _consume_binary_digits(self) -> str:
         digits: List[str] = []
         while(not self._eof and self._peek() in "01"):
             digits.append(self._peek())
             self._advance()
-        return(Token("NUMBER","".join(digits),line,col))
+        return "".join(digits)
     def _consume_identifier(self) -> Token:
         line, col = self.line, self.column
         chars: List[str] = []
@@ -480,6 +498,8 @@ class Builtins:
         self._register_variadic("LEN", 0, lambda vals: len(vals))
         self._register_fixed("LOG", 1, self._safe_log)
         self._register_fixed("CLOG", 1, self._safe_clog)
+        self._register_custom("MAIN", 0, 0, self._main)
+        self._register_custom("IMPORT", 1, 1, self._import)
         self._register_custom("INPUT", 0, 0, self._input)
         self._register_custom("PRINT", 0, None, self._print)
         self._register_custom("ASSERT", 1, 1, self._assert)
@@ -556,6 +576,49 @@ class Builtins:
         if value & (value - 1) == 0:
             return value.bit_length() - 1
         return value.bit_length()
+
+    def _main(
+        self,
+        interpreter: "Interpreter",
+        _: List[int],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> int:
+        # Return 1 when the call originates from the primary program file, else 0.
+        root = interpreter.entry_filename
+        if root == "<string>":
+            return 1 if location.file == "<string>" else 0
+        return 1 if os.path.abspath(location.file) == root else 0
+
+    def _import(
+        self,
+        interpreter: "Interpreter",
+        _: List[int],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> int:
+        if len(arg_nodes) != 1 or not isinstance(arg_nodes[0], Identifier):
+            raise ASMRuntimeError("IMPORT expects module name identifier", location=location, rewrite_rule="IMPORT")
+
+        module_name = arg_nodes[0].name
+        base_dir = os.getcwd() if location.file == "<string>" else os.path.dirname(os.path.abspath(location.file))
+        module_path = os.path.join(base_dir, f"{module_name}.asmln")
+
+        try:
+            with open(module_path, "r", encoding="utf-8") as handle:
+                source_text = handle.read()
+        except OSError as exc:
+            raise ASMRuntimeError(f"Failed to import '{module_name}': {exc}", location=location, rewrite_rule="IMPORT")
+
+        lexer = Lexer(source_text, module_path)
+        tokens = lexer.tokenize()
+        parser = Parser(tokens, module_path, source_text.splitlines())
+        program = parser.parse()
+
+        interpreter._execute_block(program.statements, env)
+        return 0
 
     def _slice(self, a: int, hi: int, lo: int) -> int:
         if hi < lo:
@@ -645,7 +708,9 @@ class Interpreter:
         output_sink: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.source = source
-        self.filename = filename
+        normalized_filename = filename if filename == "<string>" else os.path.abspath(filename)
+        self.filename = normalized_filename
+        self.entry_filename = normalized_filename
         self.verbose = verbose
         self.input_provider = input_provider or (lambda: input(">>> "))
         self.output_sink = output_sink or (lambda text: print(text))
@@ -742,6 +807,17 @@ class Interpreter:
                     return(result)
                 raise
         if(isinstance(expression,CallExpression)):
+            if(expression.name == "IMPORT"):
+                module_label = expression.args[0].name if (expression.args and isinstance(expression.args[0], Identifier)) else None
+                dummy_args:List[int] = [0] * len(expression.args)
+                try:
+                    result:int = self.builtins.invoke(self,expression.name,dummy_args,expression.args,env,expression.location)
+                except ASMRuntimeError:
+                    self._log_step(rule="IMPORT",location=expression.location,extra={"module": module_label,"status": "error"})
+                    raise
+                self._log_step(rule="IMPORT",location=expression.location,extra={"module": module_label,"result": result})
+                return(result)
+
             args:List[int] = []
             for arg in expression.args:
                 args.append(self._evaluate_expression(arg,env))
@@ -873,12 +949,92 @@ class TracebackFormatter:
         }
         return json.dumps(data, indent=2)
 def run_cli(argv: Optional[List[str]] = None) -> int:
+    def _parse_statements_from_source(text: str, filename: str) -> List[Statement]:
+        lexer = Lexer(text, filename)
+        tokens = lexer.tokenize()
+        parser = Parser(tokens, filename, text.splitlines())
+        program = parser.parse()
+        return program.statements
+
+    def run_repl(verbose: bool) -> int:
+        print("ASM-Lang REPL. Enter statements, blank line to run buffer.")
+        interpreter = Interpreter(source="", filename="<repl>", verbose=verbose)
+        global_env = Environment()
+        global_frame = interpreter._new_frame("<repl>", global_env, None)
+        interpreter.call_stack.append(global_frame)
+        buffer: List[str] = []
+
+        while True:
+            prompt = ">>> " if not buffer else "..> "
+            try:
+                line = input(prompt)
+            except EOFError:
+                print()
+                break
+
+            stripped = line.strip()
+
+            # If buffer is empty, try to execute single-line statements immediately
+            # (so EXIT() exits without needing a blank line). Buffer multi-line
+            # constructs that start blocks (FUNC, IF, WHILE, FOR) or explicit
+            # bracket starts.
+            is_block_start = False
+            if not buffer:
+                uc = stripped.upper()
+                if uc.startswith("FUNC") or uc.startswith("IF") or uc.startswith("WHILE") or uc.startswith("FOR"):
+                    is_block_start = True
+                if stripped.endswith("[") or stripped.endswith("{"):
+                    is_block_start = True
+
+            if not buffer and stripped != "" and not is_block_start:
+                # try execute this single line immediately
+                try:
+                    statements = _parse_statements_from_source(line, "<repl>")
+                    try:
+                        interpreter._execute_block(statements, global_env)
+                    except ExitSignal as sig:
+                        return sig.code
+                except ASMParseError as error:
+                    # If parse error, fall back to buffering the line to allow
+                    # multi-line input (user may be starting a block).
+                    buffer.append(line)
+                continue
+
+            if stripped == "" and buffer:
+                source_text = "\n".join(buffer)
+                buffer.clear()
+                try:
+                    statements = _parse_statements_from_source(source_text, "<repl>")
+                    interpreter._execute_block(statements, global_env)
+                except ExitSignal as sig:
+                    return sig.code
+                except ASMParseError as error:
+                    print(f"ParseError: {error}", file=sys.stderr)
+                except ASMRuntimeError as error:
+                    if interpreter.logger.entries:
+                        error.step_index = interpreter.logger.entries[-1].step_index
+                    formatter = TracebackFormatter(interpreter)
+                    print(formatter.format_text(error, verbose=interpreter.verbose), file=sys.stderr)
+                    interpreter.call_stack = [global_frame]
+                continue
+
+            buffer.append(line)
+
+        return 0
+
     parser = argparse.ArgumentParser(description="ASM-Lang reference interpreter")
-    parser.add_argument("program", help="Source file path or literal source with -source")
+    parser.add_argument("program", nargs="?", help="Source file path or literal source with -source")
     parser.add_argument("-source", "--source", dest="source_mode", action="store_true", help="Treat program argument as literal source text")
     parser.add_argument("-verbose", "--verbose", dest="verbose", action="store_true", help="Emit env snapshots in tracebacks")
     parser.add_argument("--traceback-json", action="store_true", help="Also emit JSON traceback")
     args = parser.parse_args(argv)
+
+    if args.program is None:
+        if args.source_mode:
+            print("-source requires a program string", file=sys.stderr)
+            return 1
+        return run_repl(verbose=args.verbose)
+
     if args.source_mode:
         source_text = args.program
         filename = "<string>"
