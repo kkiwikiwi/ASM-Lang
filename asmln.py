@@ -122,27 +122,35 @@ class Lexer:
         return "".join(digits)
     def _consume_identifier(self) -> Token:
         line, col = self.line, self.column
+        # Defensive check: identifiers must not start with the digits '0' or '1'.
+        # Normally this is enforced by _is_identifier_start, but check here
+        # so that the lexer produces a clear parse error if invoked incorrectly.
+        if not self._eof and self._peek() in "01":
+            raise ASMParseError(
+                f"Identifiers must not start with '0' or '1' at {self.filename}:{line}:{col}"
+            )
         chars: List[str] = []
         while(not self._eof and self._is_identifier_part(self._peek())):
             chars.append(self._peek())
             self._advance()
         value = "".join(chars)
-        if(any(ch in "01" for ch in value)):
-            raise ASMParseError(f"Identifiers may not contain '0' or '1' at {line}:{col} ({value})")
-        token_type:str = value if value in KEYWORDS else "IDENT"
-        return(Token(token_type,value,line,col))
+        token_type: str = value if value in KEYWORDS else "IDENT"
+        return Token(token_type, value, line, col)
     def _is_identifier_start(self, ch: str) -> bool:
         # Only allow ASCII letters and underscore as the start of an identifier.
         # This enforces the spec requirement that identifiers must be ASCII-only.
         return (ch == "_") or ("A" <= ch <= "Z") or ("a" <= ch <= "z")
     def _is_identifier_part(self, ch: str) -> bool:
-        # Allow ASCII letters, underscore, and digits 2-9 (digits '0' and '1' are disallowed
-        # per the language spec because they would collide with binary-literal syntax).
+        # Allow ASCII letters, underscore, and digits (including '0' and '1').
+        # The first character of an identifier must not be '0' or '1'
+        # (this is enforced by _is_identifier_start and by a defensive
+        # check in _consume_identifier). Characters '0' and '1' are permitted
+        # in subsequent positions inside an identifier.
         return (
             (ch == "_")
             or ("A" <= ch <= "Z")
             or ("a" <= ch <= "z")
-            or ("2" <= ch <= "9")
+            or ("0" <= ch <= "9")
         )
     @property
     def _eof(self) -> bool:
@@ -368,6 +376,15 @@ class Environment:
         self.parent = parent
         self.values: Dict[str, int] = {}
     def set(self, name: str, value: int) -> None:
+        # Assign to the nearest environment that already contains the name.
+        # If the name does not exist in any parent, create it in this env.
+        env: Optional[Environment] = self
+        while env is not None:
+            if name in env.values:
+                env.values[name] = value
+                return
+            env = env.parent
+        # Not found in parents: bind in the current environment
         self.values[name] = value
     def get(self, name: str) -> int:
         if name in self.values:
@@ -377,10 +394,21 @@ class Environment:
         raise ASMRuntimeError(f"Undefined identifier '{name}'", rewrite_rule="IDENT")
 
     def delete(self, name: str) -> None:
-        if name in self.values:
-            del self.values[name]
-            return
+        # Delete the identifier from the nearest environment that defines it.
+        env: Optional[Environment] = self
+        while env is not None:
+            if name in env.values:
+                del env.values[name]
+                return
+            env = env.parent
         raise ASMRuntimeError(f"Cannot delete undefined identifier '{name}'", rewrite_rule="DEL")
+    def has(self, name: str) -> bool:
+        """Return True if 'name' exists in this environment or any parent."""
+        if name in self.values:
+            return True
+        if self.parent is not None:
+            return self.parent.has(name)
+        return False
     def snapshot(self) -> Dict[str, int]:
         return dict(self.values)
 @dataclass
@@ -464,7 +492,7 @@ class Builtins:
         self._register_fixed("SUB", 2, lambda a, b: a - b)
         self._register_fixed("MUL", 2, lambda a, b: a * b)
         self._register_fixed("DIV", 2, self._safe_div)
-        self._register_fixed("CEIL", 2, self._safe_ceil)
+        self._register_fixed("CDIV", 2, self._safe_cdiv)
         self._register_fixed("MOD", 2, self._safe_mod)
         self._register_fixed("POW", 2, self._safe_pow)
         self._register_fixed("NEG", 1, lambda a: -a)
@@ -496,6 +524,7 @@ class Builtins:
         self._register_variadic("ANY", 1, lambda vals: 1 if any(_as_bool(v) for v in vals) else 0)
         self._register_variadic("ALL", 1, lambda vals: 1 if all(_as_bool(v) for v in vals) else 0)
         self._register_variadic("LEN", 0, lambda vals: len(vals))
+        self._register_variadic("JOIN", 1, self._join)
         self._register_fixed("LOG", 1, self._safe_log)
         self._register_fixed("CLOG", 1, self._safe_clog)
         self._register_custom("MAIN", 0, 0, self._main)
@@ -504,6 +533,7 @@ class Builtins:
         self._register_custom("PRINT", 0, None, self._print)
         self._register_custom("ASSERT", 1, 1, self._assert)
         self._register_custom("DEL", 1, 1, self._delete)
+        self._register_custom("EXIST", 1, 1, self._exist)
         self._register_custom("EXIT", 0, 1, self._exit)
     def _register_fixed(self, name: str, arity: int, func: Callable[..., int]) -> None:
         def impl(interpreter: "Interpreter", args: List[int], _: List[Expression], __: Environment, ___: SourceLocation) -> int:
@@ -539,10 +569,10 @@ class Builtins:
         if b == 0:
             raise ASMRuntimeError("Division by zero", rewrite_rule="DIV")
         return a // b
-    def _safe_ceil(self, a: int, b: int) -> int:
+    def _safe_cdiv(self, a: int, b: int) -> int:
         if b == 0:
-            raise ASMRuntimeError("Division by zero", rewrite_rule="CEIL")
-        # Compute ceil(a / b) using integer operations only.
+            raise ASMRuntimeError("Division by zero", rewrite_rule="CDIV")
+        # Compute ceiling division CDIV(a / b) using integer operations only.
         # Use Python's floor division to get the floor quotient `q`.
         q = a // b
         # If remainder is zero then the division is exact; otherwise ceil is q+1.
@@ -566,6 +596,19 @@ class Builtins:
         for value in values:
             result *= value
         return result
+    def _join(self, values: List[int]) -> int:
+        # Allow either all non-negative arguments or all negative arguments.
+        if any(value < 0 for value in values):
+            if not all(value < 0 for value in values):
+                raise ASMRuntimeError("JOIN arguments must not mix positive and negative values", rewrite_rule="JOIN")
+            # All values are negative: concatenate the binary spellings of their absolute values,
+            # then return the negated integer value.
+            abs_vals = [abs(v) for v in values]
+            bits = "".join("0" if v == 0 else format(v, "b") for v in abs_vals)
+            return -int(bits or "0", 2)
+        # All values non-negative: concatenate their binary spellings in call order.
+        bits = "".join("0" if value == 0 else format(value, "b") for value in values)
+        return int(bits or "0", 2)
     def _safe_log(self, value: int) -> int:
         if value <= 0:
             raise ASMRuntimeError("LOG argument must be > 0", rewrite_rule="LOG")
@@ -610,7 +653,17 @@ class Builtins:
             with open(module_path, "r", encoding="utf-8") as handle:
                 source_text = handle.read()
         except OSError as exc:
-            raise ASMRuntimeError(f"Failed to import '{module_name}': {exc}", location=location, rewrite_rule="IMPORT")
+            # Fallback: also search for a `lib` subdirectory adjacent to the
+            # interpreter implementation (useful when modules are shipped
+            # alongside the interpreter in a `lib/` directory).
+            interpreter_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            lib_module_path = os.path.join(interpreter_dir, "lib", f"{module_name}.asmln")
+            try:
+                with open(lib_module_path, "r", encoding="utf-8") as handle:
+                    source_text = handle.read()
+                    module_path = lib_module_path
+            except OSError:
+                raise ASMRuntimeError(f"Failed to import '{module_name}': {exc}", location=location, rewrite_rule="IMPORT")
 
         lexer = Lexer(source_text, module_path)
         tokens = lexer.tokenize()
@@ -686,6 +739,21 @@ class Builtins:
             err.location = location
             raise
         return 0
+    def _exist(
+        self,
+        interpreter: "Interpreter",
+        args: List[int],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> int:
+        # EXIST requires a plain identifier argument and returns 1 if that
+        # identifier exists in the current environment (searching parents),
+        # otherwise 0. This is intended for LBYL-style checks.
+        if not arg_nodes or not isinstance(arg_nodes[0], Identifier):
+            raise ASMRuntimeError("EXIST requires an identifier argument", location=location, rewrite_rule="EXIST")
+        name = arg_nodes[0].name
+        return 1 if env.has(name) else 0
     def _exit(
         self,
         interpreter: "Interpreter",
@@ -817,6 +885,20 @@ class Interpreter:
                     raise
                 self._log_step(rule="IMPORT",location=expression.location,extra={"module": module_label,"result": result})
                 return(result)
+
+            # Builtins that operate on identifier nodes (DEL, EXIST) must not
+            # cause evaluation of the identifier expression (which would raise
+            # if the identifier is undefined). Pass dummy numeric args and the
+            # raw arg nodes to the builtin so it can inspect names itself.
+            if expression.name in ("DEL", "EXIST"):
+                dummy_args:List[int] = [0] * len(expression.args)
+                try:
+                    result:int = self.builtins.invoke(self, expression.name, dummy_args, expression.args, env, expression.location)
+                except ASMRuntimeError as err:
+                    self._log_step(rule=expression.name, location=expression.location, extra={"args": None, "status": "error"})
+                    raise
+                self._log_step(rule=expression.name, location=expression.location, extra={"args": None, "result": result})
+                return result
 
             args:List[int] = []
             for arg in expression.args:
@@ -965,7 +1047,7 @@ def run_cli(argv: Optional[List[str]] = None) -> int:
         buffer: List[str] = []
 
         while True:
-            prompt = ">>> " if not buffer else "..> "
+            prompt = "\x1b[38;2;153;221;255m>>>\033[0m " if not buffer else "\x1b[38;2;153;221;255m..>\033[0m "
             try:
                 line = input(prompt)
             except EOFError:

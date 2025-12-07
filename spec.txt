@@ -61,7 +61,11 @@ and the first digit are ignored and the literal is treated as negative.
 Identifiers denote variables and user-defined functions. They must be
 non-empty and case-sensitive. An identifier must not contain non-ASCII
 characters, nor any of the following characters: '{', '}', '[', ']', '(',
-')', '0', '1', '=', ',', '#'. The namespace is flat: variables and
+')', '=', ',', '#'. The first character of an identifier must not be the
+digit '0' or '1' (these digits are used to begin binary integer literals).
+However, the characters '0' and '1' are permitted in subsequent positions
+within an identifier (for example, `a01` and `X10Y` are valid identifiers,
+while `0foo` and `1bar` are not). The namespace is flat: variables and
 functions share a single identifier space, so a given name cannot
 simultaneously denote both. A user-defined function name must not conflict
 with the name of any built-in operator or function (see Section 4.1).
@@ -127,7 +131,7 @@ Arithmetic operators include 'ADD(a, b)' for integer addition, 'SUB(a, b)'
 for subtraction ('a - b'), and 'MUL(a, b)' for multiplication. 'DIV(a, b)'
 performs integer division with floor rounding, returning '⌊a / b⌋'; division
 by zero is implementation-defined but should raise a runtime error.
-'CEIL(a, b)' performs integer division with ceiling rounding, returning
+'CDIV(a, b)' performs integer division with ceiling rounding, returning
 '⌈a / b⌉' and similarly treating division by zero as an error.
 'POW(a, b)' computes integer exponentiation 'a^b' for integer exponents
 'b ≥ 0'; behavior for negative exponents is undefined or
@@ -156,7 +160,17 @@ return, respectively, the larger and smaller of their two arguments.
 ..., an)' performs a Boolean OR over any number of arguments, returning '1'
 if at least one is non-zero and '0' otherwise. 'SUM(a1, a2, ..., an)'
 computes the integer sum of its arguments. 'LEN(a1, a2, ..., an)' returns the
-number of arguments supplied, that is, 'n'.
+number of arguments supplied, that is, 'n'. 'JOIN(a1, ..., aN)' concatenates
+the binary spellings of its arguments in call order and returns the integer
+whose binary representation is that concatenation. All arguments must share
+the same sign: either every argument is non-negative (the usual case), or
+every argument is negative. When all arguments are non-negative the result
+is the non-negative integer whose binary representation is the concatenation
+of the arguments' binary spellings (for example, 'JOIN(10,1)' -> '101'). When
+all arguments are negative the function concatenates the binary spellings of
+the absolute values and returns the negation of the resulting integer
+(for example, 'JOIN(-10,-1)' -> '-101'). Supplying a mixture of positive and
+negative arguments is a runtime error.
 
 Logarithmic operators are defined in base 2. 'LOG(a)' returns the floor of
 the base-2 logarithm: for 'a > 0', it is the greatest integer 'k' such that
@@ -179,14 +193,19 @@ deterministic.
 
 'IMPORT(name)' loads and executes another source file inside the caller's
 namespace. The argument must be an identifier naming a module; the
-interpreter looks for a file named '<name>.asmln' in the same directory as
-the current source file. When the current source is provided via the
-'-source' string literal mode, the search directory is the process's current
-working directory. The imported file is parsed and run as if its top-level
-statements appeared inline at the call site: assignments affect the caller's
-environment, and any functions defined in the imported module become
-available to the caller. Each 'IMPORT' call executes the target module anew;
-there is no automatic caching or cycle detection.
+interpreter first looks for a file named '<name>.asmln' in the same
+directory as the current source file. When the current source is provided
+via the '-source' string literal mode, the primary search directory is the
+process's current working directory. If the module file is not found in
+that location, the interpreter will additionally attempt to load the file
+from a `lib` subdirectory located alongside the interpreter implementation
+(that is, '<interpreter_dir>/lib/<name>.asmln', where '<interpreter_dir>' is
+the directory containing the interpreter script or executable). The imported
+file is parsed and run as if its top-level statements appeared inline at
+the call site: assignments affect the caller's environment, and any
+functions defined in the imported module become available to the caller.
+Each 'IMPORT' call executes the target module anew; there is no automatic
+caching or cycle detection.
 
 'INPUT()' (or simply 'INPUT' in expression position) reads a value from the
 console or input stream. If the incoming text is empty, the result is '0'.
@@ -342,28 +361,16 @@ execution of any program can be deterministically replayed from its seed
 configuration together with the recorded inputs.
 
 
-9. Example
+9. Standard Library
 ----------
 
-FUNC IS_PRIME(n)[ # Primality test for n
-  IF(LTE(n,1))[
-    RETURN(0)
-  ]
-  IF(EQ(n,10))[
-    RETURN(1)
-  ]
-  IF(EQ(MOD(n,10),0))[
-    RETURN(0)
-  ]
-  i = 11
-  WHILE(LTE(MUL(i,i), n))[
-    IF(EQ(MOD(n,i),0))[
-      RETURN(0)
-    ]
-    i = ADD(i,10)
-  ]
-  RETURN(1)
-]
+The standard library is a group of modules for common use cases distributed
+with the interpreter.
+It includes modules for:
+- Collections: indexed lists of integers with efficient encoding and decoding.
+- Prime: primality testing and prime number generation, along with
+  factorization and other common prime utilities.
+- PRNG: pseudorandom number generation with seed management.
 
 10. Tracebacks and Error Reporting
 ---------------------------------
@@ -382,12 +389,12 @@ rewrite steps that led to the error for deterministic replay.
 
 - Trigger: a traceback is produced when a runtime error occurs that
   prevents normal forward execution (e.g., an assertion failure, divide
-  by zero, undefined variable reference, executing `RETURN` outside of a
+  by zero, undefined variable reference, executing 'RETURN' outside of a
   function, or any other interpreter-defined runtime error).
 - Content: the traceback must list frames in chronological call order
   from the outermost (earliest) frame to the innermost (where the
   error occurred), and for each frame include: function name (or
-  `<top-level>` for global code), precise source location, a short
+  '<top-level>' for global code), precise source location, a short
   excerpt of the offending statement, and identifiers linking to the
   corresponding states in the state log.
 - State linkage: every frame must reference at least one serialized
@@ -411,25 +418,25 @@ To make tracebacks precise and implementable, the state log (and the
 machine state representation) must include the following information at
 every step when relevant:
 
-- `step_index` (integer): monotonically increasing index of the rewrite
+- 'step_index' (integer): monotonically increasing index of the rewrite
   step in the state log.
-- `state_id` (opaque string or integer): stable identifier for the
+- 'state_id' (opaque string or integer): stable identifier for the
   serialized machine state (seed, intermediate, or terminal).
-- `source_location` (optional): when a rewrite step is associated with a
-  program location, include a `source_location` record with at least the
-  following fields: `file` (string), `line` (integer), and `statement`
+- 'source_location' (optional): when a rewrite step is associated with a
+  program location, include a 'source_location' record with at least the
+  following fields: 'file' (string), 'line' (integer), and 'statement'
   (string containing the top-level statement text or canonical snippet).
-- `frame_id` (when present): identifier for the active call-frame in
+- 'frame_id' (when present): identifier for the active call-frame in
   that state; frames must be addressable and referable by the traceback
   generator.
-- `env_snapshot` (selectable): a serialized partial view of the state
+- 'env_snapshot' (selectable): a serialized partial view of the state
   containing bindings for the local variables of the active frame and,
   where reasonable, a subset of global variables. The interpreter may
   elide large or sensitive values by policy, but must provide a clear
   indication when values are elided.
-- `rewrite_record`: for each step that performs a state transition, the
+- 'rewrite_record': for each step that performs a state transition, the
   log must include a record describing the rewrite rule (name, inputs,
-  and parameters), and the `from_state_id` and `to_state_id` pairs.
+  and parameters), and the 'from_state_id' and 'to_state_id' pairs.
 
 10.3 Traceback textual format (recommended)
 
@@ -441,11 +448,11 @@ Traceback (most recent call last):
     State log index: <step_index>  State id: <state_id>
 
 The final (innermost) frame is then followed by a short error message
-that includes the failing rewrite (for example: `DivisionByZero`), the
-rewrite rule name and the `step_index` at which it failed. In verbose
-mode, each frame block is followed by a labelled `State snapshot:` and a
-`State transformation:` section that contain the serialized `env_snapshot`
-and the `rewrite_record` (including `from_state_id` and `to_state_id`) so
+that includes the failing rewrite (for example: 'DivisionByZero'), the
+rewrite rule name and the 'step_index' at which it failed. In verbose
+mode, each frame block is followed by a labelled 'State snapshot:' and a
+'State transformation:' section that contain the serialized 'env_snapshot'
+and the 'rewrite_record' (including 'from_state_id' and 'to_state_id') so
 that the failure can be reproduced by replaying the states and the
 associated inputs.
 
@@ -483,27 +490,27 @@ schema is:
 }
 
 The schema above is a guideline; implementations may extend it with
-additional fields (for example, a `diff` between `from_state` and
-`to_state`, or full serialized states). The only requirement is that a
+additional fields (for example, a Bitwise XOR between 'from_state' and
+'to_state', or full serialized states). The only requirement is that a
 consumer of the state log can identify which state and which rewrite
 step correspond to each frame.
 
 10.5 Point of origin in source code
 
 The trace must clearly identify the point of origin (the expression or
-statement that directly caused the error) by including the `source_location`
-and the `step_index` of the failing rewrite. Implementations should also
+statement that directly caused the error) by including the 'source_location'
+and the 'step_index' of the failing rewrite. Implementations should also
 include the exact token or sub-expression when available (for example,
-the `DIV(a,0)` call that produced the division-by-zero), and the
+the 'DIV(a,0)' call that produced the division-by-zero), and the
 surrounding source excerpt (at least one line above and below, if
 available) to make diagnosis easier.
 
 10.6 Integrating tracebacks with the disassembler and replay
 
 - The disassembler view must support jumping from a printed traceback to
-  the corresponding state-log entry (`step_index`) and to the
+  the corresponding state-log entry ('step_index') and to the
   reconstructed source location so that a user can inspect the full
-  `from_state` and `to_state` pair and step through the rewrite that
+  'from_state' and 'to_state' pair and step through the rewrite that
   produced the error.
 - Because the state log records I/O and nondeterminism explicitly, the
   disassembler/replayer must be able to replay the exact failing step
@@ -512,11 +519,11 @@ available) to make diagnosis easier.
 10.7 Implementation notes for builders
 
 - The instrumentation needed for tracebacks is primarily bookkeeping:
-  ensure the state log records `step_index`, `state_id`, `frame_id`, and
-  optional `source_location` for each step when appropriate.
-- When collecting `env_snapshot` data, prefer including only the local
+  ensure the state log records 'step_index', 'state_id', 'frame_id', and
+  optional 'source_location' for each step when appropriate.
+- When collecting 'env_snapshot' data, prefer including only the local
   environment of the active frame and a small set of globals to keep
-  tracebacks readable; provide a `--verbose` or similar flag to emit
+  tracebacks readable; provide a '--verbose' or similar flag to emit
   full snapshots.
 - Security note: because state snapshots may contain sensitive data,
   implementations should provide a configurable policy to redact or
@@ -525,18 +532,18 @@ available) to make diagnosis easier.
 10.8 Example (concise textual traceback)
 
 Traceback (most recent call last):
-  File "prog.asm", line 21, in <top-level>
+  File "prog.asmln", line 21, in <top-level>
     result = compute(foo, bar)
     State log index: 121  State id: s_0121
-  File "lib.asm", line 88, in compute
+  File "lib.asmln", line 88, in compute
     x = DIV(a, b)
     State log index: 123  State id: s_0123
 DivisionByZero: attempted to DIV by zero at step_index=123 (rewrite: DIV)
 
 This example shows the outer call at the program top-level and the
-innermost failing call in `compute`. A verbose report would additionally
-print the `env_snapshot` for `compute` showing `a: 17, b: 0` and the
-full `rewrite_record` describing the DIV operation that failed.
+innermost failing call in 'compute'. A verbose report would additionally
+print the 'env_snapshot' for 'compute' showing 'a: 17, b: 0' and the
+full 'rewrite_record' describing the DIV operation that failed.
 
   11. Interpreter Use
   -------------------
@@ -545,75 +552,75 @@ full `rewrite_record` describing the DIV operation that failed.
   and how to enable verbose tracebacks that include environment snapshots.
 
   - Invocation arguments: the interpreter reads its first program argument
-    (that is, `argv[1]`) as the program source. If the `-source` flag is not
-    present, `argv[1]` is interpreted as a path to a source file and the
-    interpreter loads and parses that file. If the `-source` flag is present,
-    `argv[1]` is treated as the source text itself (a string containing the
+    (that is, 'argv[1]') as the program source. If the '-source' flag is not
+    present, 'argv[1]' is interpreted as a path to a source file and the
+    interpreter loads and parses that file. If the '-source' flag is present,
+    'argv[1]' is treated as the source text itself (a string containing the
     program) and is parsed directly without reading a file.
 
-  - Verbose tracebacks: if the `-verbose` flag is supplied on the command
+  - Verbose tracebacks: if the '-verbose' flag is supplied on the command
     line, tracebacks include the environment snapshots described in
-    Section 10.8. In concise traceback mode the `-verbose` flag causes the
-    interpreter to attach an `env_snapshot` entry to each frame shown; in
-    verbose traceback mode the same flag expands the printed `State snapshot:`
+    Section 10.8. In concise traceback mode the '-verbose' flag causes the
+    interpreter to attach an 'env_snapshot' entry to each frame shown; in
+    verbose traceback mode the same flag expands the printed 'State snapshot:'
     blocks to include the selected local environment and any small set of
     globals included by policy. The snapshot contents follow the requirements
     in Section 10.2 and are suitable for deterministic replay.
 
   Notes:
   - The interpreter may support additional flags and a different ordering of
-    arguments; the rules above define the semantics for `argv[1]`, `-source`,
-    and `-verbose` specifically and are intended to be stable for tooling and
+    arguments; the rules above define the semantics for 'argv[1]', '-source',
+    and '-verbose' specifically and are intended to be stable for tooling and
     replay purposes.
 
   Example invocations (illustrative):
-  - File mode: `interpreter program.asm`
-  - Source-string mode: `interpreter -source "foo = INPUT\nPRINT(foo)" -verbose`
+  - File mode: 'interpreter program.asm'
+  - Source-string mode: 'interpreter -source "foo = INPUT\nPRINT(foo)" -verbose'
 
-  - REPL / Interactive mode: `interpreter` (no program argument)
+  - REPL / Interactive mode: 'interpreter' (no program argument)
 
 REPL (Interactive Mode)
 -----------------------
 
-When the interpreter is invoked without a program path or a `-source` string
+When the interpreter is invoked without a program path or a '-source' string
 argument it enters an interactive read–eval–print loop (REPL). The REPL is a
 convenient development and exploration environment that executes ASM-Lang
 statements using the same parser, runtime, built-ins, and state-logging
 semantics as file-mode execution. The following rules describe REPL
 behaviour:
 
-- Invocation: running `interpreter` with no positional `program` argument
-  launches the REPL. The `-verbose` and `--traceback-json` flags keep the
+- Invocation: running 'interpreter' with no positional 'program' argument
+  launches the REPL. The '-verbose' and '--traceback-json' flags keep the
   same meanings in the REPL as in batch mode.
 - Prompting and input: the REPL presents a primary prompt for new top-level
   input and a continuation prompt while the user is entering a multi-line
-  block (for example, the body of `FUNC`, `IF`, `WHILE`, or `FOR`).
+  block (for example, the body of 'FUNC', 'IF', 'WHILE', or 'FOR').
 - Single-line execution: when the user enters a single complete top-level
-  statement (for example `x = 1010` or `PRINT(x)`), the REPL parses and
+  statement (for example 'x = 1010' or 'PRINT(x)'), the REPL parses and
   executes that statement immediately and prints any side-effect output.
-  This means `EXIT()` typed as a single-line statement will terminate the
-  REPL immediately and return the supplied exit code (or `0` if omitted),
-  identical to the behaviour when `EXIT()` is executed in a file.
-- Multi-line buffering: if a statement begins a block (for example a `FUNC`
-  definition or an `IF(...)[` that spans multiple lines), the REPL buffers
+  This means 'EXIT()' typed as a single-line statement will terminate the
+  REPL immediately and return the supplied exit code (or '0' if omitted),
+  identical to the behaviour when 'EXIT()' is executed in a file.
+- Multi-line buffering: if a statement begins a block (for example a 'FUNC'
+  definition or an 'IF(...)[' that spans multiple lines), the REPL buffers
   lines until the block is complete (a blank line may be used to indicate
   end-of-entry when appropriate). When the buffer is complete the REPL
   parses and executes the collected statements as a unit.
 - Environment persistence: variables, function definitions, and the state
   logger persist for the duration of the REPL session (that is, top-level
   bindings remain available across successive inputs until explicitly
-  deleted with `DEL(name)`). This lets the user incrementally build up a
+  deleted with 'DEL(name)'). This lets the user incrementally build up a
   program interactively.
 - Deterministic logging and tracebacks: all REPL-executed statements are
   recorded in the same state log format used for file-mode execution. Errors
-  produce tracebacks in the same concise and verbose modes; the `-verbose`
-  flag causes the REPL to attach `env_snapshot` entries in tracebacks when
+  produce tracebacks in the same concise and verbose modes; the '-verbose'
+  flag causes the REPL to attach 'env_snapshot' entries in tracebacks when
   available.
 
 Notes and examples:
-- Start REPL: `interpreter`
-- Exit via meta-command: type `.exit` or press Ctrl-D (EOF)
-- Exit programmatically: `EXIT()` — this immediately terminates the
+- Start REPL: 'interpreter'
+- Exit via meta-command: type '.exit' or press Ctrl-D (EOF)
+- Exit programmatically: 'EXIT()' — this immediately terminates the
   interpreter and returns the specified exit code to the shell, just like in
   batch execution.
 
@@ -634,13 +641,14 @@ Function / Operator Signatures (expression position)
 - 'EXIT()' or 'EXIT(code)' : terminate program immediately with optional exit code (default 0)
 - 'IMPORT(name)' : load and execute '<name>.asmln' beside the caller, sharing the caller's namespace
 - Binary literal: optional leading '-' (spaces/tabs/CR allowed after the dash) then '{0,1}+'
+ - 'EXIST(x)' : returns '1' if the identifier 'x' exists in the current environment (searching enclosing environments), else '0'. The argument must be an identifier; supplying an expression that is not a plain identifier is a runtime error.
 
 Arithmetic
 - 'ADD(a, b)' : a + b
 - 'SUB(a, b)' : a - b
 - 'MUL(a, b)' : a * b
 - 'DIV(a, b)' : floor(a / b)
-- 'CEIL(a, b)' : ceil(a / b)
+- 'CDIV(a, b)' : ceil(a / b)
 - 'POW(a, b)' : a ^ b (b >= 0)
 - 'MOD(a, b)' : remainder of a / b
  - 'NEG(a)' : -a (additive inverse)
@@ -653,7 +661,7 @@ Bitwise / Boolean
 - 'BOR(a, b)' : bitwise OR
 - 'BXOR(a, b)' : bitwise XOR
 - 'BNOT(a)' : bitwise complement
- - 'SLICE(a, hi, lo)' : inclusive bit-slice of `a` from bit index `hi` down to `lo` (LSB index 0)
+- 'SLICE(a, hi, lo)' : inclusive bit-slice of 'a' from bit index 'hi' down to 'lo' (LSB index 0)
 - 'AND(a, b)' : Boolean AND -> 0 or 1
 - 'OR(a, b)' : Boolean OR -> 0 or 1
 - 'XOR(a, b)' : Boolean XOR -> 0 or 1
@@ -673,6 +681,7 @@ Aggregates / Utilities
 - 'LEN(a1, ..., aN)' : number of arguments (N)
 - 'ALL(a1, ..., aN)' : 1 if all non-zero else 0
 - 'ANY(a1, ..., aN)' : 1 if any non-zero else 0
+ - 'JOIN(a1, ..., aN)' : concatenate binary spellings of arguments; all must share sign (all non-negative or all negative). If all negative, result is the negation of the concatenation of absolute values.
  - 'PROD(a1, ..., aN)' : product of arguments
 
 Logarithms
