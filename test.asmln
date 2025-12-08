@@ -1,6 +1,7 @@
 IMPORT(collection)
 IMPORT(prng)
 IMPORT(csprng)
+IMPORT(prime)
 
 FUNC RUN_TESTS():INT{
     # Collection basics
@@ -42,6 +43,25 @@ FUNC RUN_TESTS():INT{
     csprng.CS_PRNG_SEED(101)
     INT: y = csprng.CS_PRNG_NEXT()
     ASSERT( EQ(x, y) )
+
+    # Prime library tests
+    # Basic primality checks
+    ASSERT( EQ( prime.IS_PRIME(10), 1 ) )    # 2 is prime
+    ASSERT( EQ( prime.IS_PRIME(11), 1 ) )    # 3 is prime
+    ASSERT( EQ( prime.IS_PRIME(101), 1 ) )   # 5 is prime
+
+    # NEXT_PRIME / PREV_PRIME
+    ASSERT( EQ( prime.NEXT_PRIME(100), 101 ) )   # next prime after 4 is 5
+    ASSERT( EQ( prime.PREV_PRIME(101), 11 ) )    # previous prime before 5 is 3
+
+    # Mersenne prime check (p=3 -> 2^3-1 = 7, prime)
+    ASSERT( EQ( prime.IS_MERSENNE_PRIME(11), 1 ) )
+
+    # FACTOR: factor 10 (1010) -> [2 (10), 5 (101)]
+    INT: factors = prime.FACTOR(1010)
+    ASSERT( EQ( collection.GET_COUNT(factors), 10 ) )
+    ASSERT( EQ( collection.COL_GET(factors, 0), 10 ) )
+    ASSERT( EQ( collection.COL_GET(factors, 1), 101 ) )
 
     # If we reach here all tests passed; print success code and return
     PRINT(1)

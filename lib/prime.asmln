@@ -8,8 +8,12 @@ FUNC IS_PRIME(INT:n):INT{
     IF(EQ(n,10)){
         RETURN(1)
     }
+    # reject even numbers greater than 2
+    IF(EQ(MOD(n,10), 0)){
+        RETURN(0)
+    }
     INT: i = 11
-    WHILE(LTE(POW(1,10))){
+    WHILE(LTE(MUL(i,i), n)){
         IF(EQ(MOD(n,i),0)){
             RETURN(0)
         }
@@ -19,7 +23,7 @@ FUNC IS_PRIME(INT:n):INT{
 }
 
 FUNC NEXT_PRIME(INT:start):INT{
-    INT: n = start
+    INT: n = ADD(start,1)
     WHILE(1){
         IF(IS_PRIME(n)){
             RETURN(n)
@@ -29,7 +33,7 @@ FUNC NEXT_PRIME(INT:start):INT{
 }
 
 FUNC PREV_PRIME(INT:start):INT{
-    INT: n = start
+    INT: n = SUB(start,1)
     WHILE(GT(n,1)){
         IF(IS_PRIME(n)){
             RETURN(n)

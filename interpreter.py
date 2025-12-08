@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import subprocess
 import math
 import os
 import sys
@@ -286,6 +287,8 @@ class Builtins:
         self._register_int_only("CLOG", 1, self._safe_clog)
         self._register_custom("INT", 1, 1, self._int_op)
         self._register_custom("STR", 1, 1, self._str_op)
+        self._register_custom("UPPER", 1, 1, self._upper)
+        self._register_custom("LOWER", 1, 1, self._lower)
         self._register_custom("MAIN", 0, 0, self._main)
         self._register_custom("IMPORT", 1, 1, self._import)
         self._register_custom("INPUT", 0, 0, self._input)
@@ -293,6 +296,12 @@ class Builtins:
         self._register_custom("ASSERT", 1, 1, self._assert)
         self._register_custom("DEL", 1, 1, self._delete)
         self._register_custom("EXIST", 1, 1, self._exist)
+        self._register_custom("ISINT", 1, 1, self._isint)
+        self._register_custom("ISSTR", 1, 1, self._isstr)
+        self._register_custom("READFILE", 1, 1, self._readfile)
+        self._register_custom("WRITEFILE", 2, 2, self._writefile)
+        self._register_custom("EXISTFILE", 1, 1, self._existfile)
+        self._register_custom("RUN", 1, 1, self._run)
         self._register_custom("EXIT", 0, 1, self._exit)
 
     def _register_int_only(self, name: str, arity: int, func: Callable[..., int]) -> None:
@@ -540,6 +549,30 @@ class Builtins:
             return Value(TYPE_STR, "-" + format(-number, "b"))
         return Value(TYPE_STR, format(number, "b"))
 
+    def _upper(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        s = self._expect_str(args[0], "UPPER", location)
+        # Convert ASCII letters to upper-case; other bytes are unchanged
+        return Value(TYPE_STR, s.upper())
+
+    def _lower(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        s = self._expect_str(args[0], "LOWER", location)
+        # Convert ASCII letters to lower-case; other bytes are unchanged
+        return Value(TYPE_STR, s.lower())
+
     def _safe_log(self, value: int) -> int:
         if value <= 0:
             raise ASMRuntimeError("LOG argument must be > 0", rewrite_rule="LOG")
@@ -711,6 +744,113 @@ class Builtins:
             raise ASMRuntimeError("EXIST requires an identifier argument", location=location, rewrite_rule="EXIST")
         name = arg_nodes[0].name
         return Value(TYPE_INT, 1 if env.has(name) else 0)
+
+    def _isint(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        # Expect an identifier node so we examine the symbol's binding and type
+        if not arg_nodes or not isinstance(arg_nodes[0], Identifier):
+            raise ASMRuntimeError("ISINT requires an identifier argument", location=location, rewrite_rule="ISINT")
+        name = arg_nodes[0].name
+        if not env.has(name):
+            return Value(TYPE_INT, 0)
+        try:
+            val = env.get(name)
+        except ASMRuntimeError as err:
+            err.location = location
+            raise
+        return Value(TYPE_INT, 1 if val.type == TYPE_INT else 0)
+
+    def _isstr(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        # Expect an identifier node so we examine the symbol's binding and type
+        if not arg_nodes or not isinstance(arg_nodes[0], Identifier):
+            raise ASMRuntimeError("ISSTR requires an identifier argument", location=location, rewrite_rule="ISSTR")
+        name = arg_nodes[0].name
+        if not env.has(name):
+            return Value(TYPE_INT, 0)
+        try:
+            val = env.get(name)
+        except ASMRuntimeError as err:
+            err.location = location
+            raise
+        return Value(TYPE_INT, 1 if val.type == TYPE_STR else 0)
+
+    def _readfile(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        path = self._expect_str(args[0], "READFILE", location)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = handle.read()
+        except OSError as exc:
+            raise ASMRuntimeError(f"Failed to read '{path}': {exc}", location=location, rewrite_rule="READFILE")
+        return Value(TYPE_STR, data)
+
+    def _writefile(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        blob = self._expect_str(args[0], "WRITEFILE", location)
+        path = self._expect_str(args[1], "WRITEFILE", location)
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(blob)
+        except OSError:
+            return Value(TYPE_INT, 0)
+        return Value(TYPE_INT, 1)
+
+    def _existfile(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        path = self._expect_str(args[0], "EXISTFILE", location)
+        return Value(TYPE_INT, 1 if os.path.exists(path) else 0)
+
+    def _run(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        # Execute a shell command and return its exit code as INT.
+        cmd = self._expect_str(args[0], "RUN", location)
+        try:
+            # Use the system shell to run the provided command string.
+            completed = subprocess.run(cmd, shell=True)
+            code = completed.returncode
+        except OSError as exc:
+            raise ASMRuntimeError(f"RUN failed: {exc}", location=location, rewrite_rule="RUN")
+        # Record the run event for deterministic logging/replay
+        interpreter.io_log.append({"event": "RUN", "cmd": cmd, "code": code})
+        # Normalize return to INT
+        return Value(TYPE_INT, int(code))
 
     def _exit(
         self,

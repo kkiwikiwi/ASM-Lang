@@ -81,8 +81,8 @@ characters, nor any of the following characters: '{', '}', '[', ']', '(',
 ')', '=', ',', '#'. The first character of an identifier must not be the
 digit '0' or '1' (these digits are used to begin binary integer literals).
 However, the characters '0' and '1' are permitted in subsequent positions
-within an identifier (for example, `a01` and `X10Y` are valid identifiers,
-while `0foo` and `1bar` are not). The namespace is flat: variables and
+within an identifier (for example, 'a01' and 'X10Y' are valid identifiers,
+while '0foo' and '1bar' are not). The namespace is flat: variables and
 functions share a single identifier space, so a given name cannot
 simultaneously denote both. A user-defined function name must not conflict
 with the name of any built-in operator or function (see Section 4.1).
@@ -101,7 +101,7 @@ which match the reference lexer implementation:
   - Uppercase letters 'A'–'Z'
   - Decimal digits '2'–'9'
   - The punctuation and symbol characters
-    `; / ! @ $ % & ~ _ + | < > ?`
+    '; / ! @ $ % & ~ _ + | < > ?'
 
 - Subsequent characters in an identifier may be any of the following:
 
@@ -109,7 +109,7 @@ which match the reference lexer implementation:
   - Uppercase letters 'A'–'Z'
   - Decimal digits '0'–'9'
   - The punctuation and symbol characters
-    `; . / ! @ $ % & ~ _ + | < > ?`
+    '; . / ! @ $ % & ~ _ + | < > ?'
 
   As noted above, non-ASCII characters remain disallowed, and the
   delimiter characters '{', '}', '[', ']', '(', ')', '=', ',', and '#'
@@ -200,6 +200,15 @@ Conversion operators:
 - STR(n) converts an INT to its binary spelling as a STR (including a leading
   '-' for negative integers). Passing a STR returns it unchanged.
 
+- UPPER(s) converts a STR by mapping all ASCII letters to their uppercase
+  equivalents and returns the resulting STR. The argument must be a STR;
+  passing an INT raises a runtime error. Non-letter characters are left
+  unchanged.
+- LOWER(s) converts a STR by mapping all ASCII letters to their lowercase
+  equivalents and returns the resulting STR. The argument must be a STR;
+  passing an INT raises a runtime error. Non-letter characters are left
+  unchanged.
+
 Input, output, and assertions:
 - INPUT() returns a STR containing the raw input line (no implicit numeric
   conversion). The I/O event is recorded for replay.
@@ -211,6 +220,24 @@ Input, output, and assertions:
   non-empty string -> 1). If the result is 0, execution halts with an
   assertion failure.
 
+File operations:
+- READFILE(path):STR — Reads the file located at 'path' and returns its
+  contents as a STR. The argument 'path' must be a STR. If the file cannot be
+  opened or read, the interpreter raises a runtime error (rewrite: READFILE).
+- WRITEFILE(blob, path):INT — Writes the string 'blob' to the file given by
+  'path'. Both arguments must be STR. On success the call returns INT 1; on
+  failure (for example, permission or I/O errors) it returns INT 0. The call
+  does not raise on write failure.
+- EXISTFILE(path):INT — Returns INT 1 when a filesystem object exists at
+  'path', otherwise returns INT 0. The argument must be a STR.
+- RUN(command):INT — Executes the provided 'command' string using the
+   host shell and returns the subprocess exit code as an INT. The 'command'
+   argument must be a STR. On a failure to start the subprocess (for example
+   if the system cannot invoke a shell), the interpreter raises a runtime
+   error (rewrite: RUN). The call records a 'RUN' event in the execution
+   I/O log containing the command text and returned exit code, enabling
+   deterministic logging and replay.
+
 Other operators (unchanged): IMPORT, MAIN, DEL, EXIST, and EXIT retain their
 previous meanings but now operate in a typed environment.
 
@@ -221,28 +248,28 @@ directory as the current source file. When the current source is provided
 via the '-source' string literal mode, the primary search directory is the
 process's current working directory. If the module file is not found in
 that location, the interpreter will additionally attempt to load the file
-from a `lib` subdirectory located alongside the interpreter implementation
+from a 'lib' subdirectory located alongside the interpreter implementation
 (that is, '<interpreter_dir>/lib/<name>.asmln', where '<interpreter_dir>' is
 the directory containing the interpreter script or executable).
 
 The imported file is parsed and executed in its own isolated top-level
 environment: top-level assignments and function definitions in the imported
 module do not directly mutate the caller's environment. During execution
-inside the imported module, unqualified identifiers (for example, `x` or
-`helper`) refer to names in the module's own top-level namespace. Qualified
-identifiers (for example, `other.FOO`) refer only to the dotted names that
+inside the imported module, unqualified identifiers (for example, 'x' or
+'helper') refer to names in the module's own top-level namespace. Qualified
+identifiers (for example, 'other.FOO') refer only to the dotted names that
 the module itself has created or imported; in other words, a module may
 refer to its own imports via qualified names, and those qualified bindings
 are scoped to that module's namespace.
 
 After the module finishes executing, each top-level binding exported by the
 module is made available to the importer under a dotted name formed by the
-module identifier and the exported symbol, for example `module.FOO` or
-`module.bar`. If the imported module itself imported other modules, those
+module identifier and the exported symbol, for example 'module.FOO' or
+'module.bar'. If the imported module itself imported other modules, those
 nested qualified bindings are preserved under the importing module's
-namespace (for example, `module.other.SYM` denotes a symbol that `module`
-imported from `other`). Callers must reference imported symbols using the
-qualified form (for example: `IMPORT(module)` followed by `module.FOO()`),
+namespace (for example, 'module.other.SYM' denotes a symbol that 'module'
+imported from 'other'). Callers must reference imported symbols using the
+qualified form (for example: 'IMPORT(module)' followed by 'module.FOO()'),
 which preserves a clear separation of namespaces between modules.
 
 Each 'IMPORT' call executes the target module anew and then publishes its
@@ -765,6 +792,12 @@ Function / Operator Signatures (expression position)
   environment (searching enclosing environments), else '0'. The argument must
   be an identifier; supplying an expression that is not a plain identifier is a
   runtime error.
+- 'ISINT(x)' : returns '1' if the identifier 'x' exists and is of type INT,
+  otherwise returns '0'. The argument must be an identifier; supplying any
+  other expression is a runtime error.
+- 'ISSTR(x)' : returns '1' if the identifier 'x' exists and is of type STR,
+  otherwise returns '0'. The argument must be an identifier; supplying any
+  other expression is a runtime error.
 
 Arithmetic (INT only)
 - 'ADD(a, b)' : a + b
