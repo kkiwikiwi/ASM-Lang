@@ -52,7 +52,7 @@ def run_repl(verbose: bool) -> int:
             uc = stripped.upper()
             if uc.startswith("FUNC") or uc.startswith("IF") or uc.startswith("WHILE") or uc.startswith("FOR"):
                 is_block_start = True
-            if stripped.endswith("[") or stripped.endswith("{"):
+            if stripped.endswith("{"):
                 is_block_start = True
 
         if not buffer and stripped != "" and not is_block_start:

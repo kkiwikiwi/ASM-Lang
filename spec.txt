@@ -48,10 +48,10 @@ line. Comments have no effect on execution.
 
 The program text is divided into several token kinds: binary integer literals
 (Section 3.1); string literals delimited by double or single quotation marks
-('"', "'", Section 3.2); identifiers for variable names and user-defined
+("\"", "'", Section 3.2); identifiers for variable names and user-defined
 function names (Section 2.5); keywords and built-ins (control-flow keywords,
 built-in operators and functions; see Sections 4 and 5); and delimiters, namely
-'(', ')', '[', ']', '{', '}', ',', ':', and '='.
+'(', ')', '{', '}', ',', ':', and '='.
 
 Keywords: The language's reserved keywords (for example, 'IF', 'WHILE', 'FUNC',
 etc.) are matched by the lexer exactly as listed in this specification and are
@@ -110,7 +110,7 @@ match the reference lexer implementation:
     '; / ! @ $ % & ~ _ + | < > ?'
 
   As noted above, non-ASCII characters remain disallowed, and the delimiter
-  characters '{', '}', '[', ']', '(', ')', '=', ',', and '#' are never
+  characters '{', '}', '(', ')', '=', ',', and '#' are never
   permitted inside identifiers.
 
 This deliberately-permissive identifier character set preserves an unambiguous
@@ -233,11 +233,8 @@ expression statements such as calls to 'PRINT' whose result is ignored,
 control-flow constructs ('IF', 'ELSIF', 'ELSE', 'WHILE', and 'FOR'), and
 function definitions ('FUNC' declarations; see Section 6).
 
-Blocks group one or more statements and are enclosed in either square or curly
-brackets: '[ statement1 ... statementN ]' or '{ statement1 ... statementN }'.
-The two bracket styles are equivalent but must match (that is, '[' closes with
-']' and '{' closes with '}'). Blocks serve as the bodies of control-flow
-constructs and functions.
+Blocks group one or more statements and are enclosed in curly brackets: '{ statement1 ... statementN }'.
+Curly braces must match (that is, '{' closes with '}'). Blocks serve as the bodies of control-flow constructs and functions.
 
 Assignments have the syntax 'TYPE : identifier = expression' on first use,
 where TYPE is 'INT' or 'STR'. Spaces around the colon and equals sign are
@@ -246,11 +243,10 @@ but must preserve the original type. Variables are deallocated only when
 'DEL(identifier)' is executed.
 
 The language provides 'IF', 'ELSIF', and 'ELSE' constructs for conditional
-execution. An 'IF' statement has the general form 'IF(condition)[ block ]' or
-'IF(condition){ block }'. Optional chained branches may follow: one or more
-'ELSIF(condition)[ block ]' or 'ELSIF(condition){ block }' clauses and an
-optional terminal 'ELSE[ block ]' or 'ELSE{ block }' clause. An 'ELSIF' or
-'ELSE' must immediately follow an 'IF' or another 'ELSIF'; otherwise it is a
+execution. An 'IF' statement has the general form 'IF(condition){ block }'.
+Optional chained branches may follow: one or more 'ELSIF(condition){ block }'
+clauses and an optional terminal 'ELSE{ block }' clause. An 'ELSIF' or 'ELSE'
+must immediately follow an 'IF' or another 'ELSIF'; otherwise it is a
 syntax error. At most one 'ELSE' may appear in a given chain. Evaluation
 proceeds by first evaluating the condition of the initial 'IF'. If it is
 non-zero, the associated block executes and the rest of the chain is skipped.
@@ -264,14 +260,13 @@ the 'INT' built-in rules (empty -> 0; binary string -> that integer; other
 non-empty -> 1) before truthiness is checked.
 
 Loops are provided via 'WHILE' and 'FOR'. A 'WHILE' loop has the form
-'WHILE(condition)[ block ]' or 'WHILE(condition){ block }'. On each iteration,
+'WHILE(condition){ block }'. On each iteration,
 the condition is evaluated; if it is non-zero, the block executes and control
 returns to the start of the loop to evaluate the condition again. If the
 condition evaluates to zero, the loop terminates and execution continues with
 the next statement.
 
-The 'FOR' construct has the form 'FOR(counter, target)[ block ]' or
-'FOR(counter, target){ block }', where 'counter' is an identifier and 'target'
+The 'FOR' construct has the form 'FOR(counter, target){ block }', where 'counter' is an identifier and 'target'
 is an expression. At loop entry, 'target' is evaluated once to a value 'T'
 (must be INT), and 'counter' is initialized to the INT value '0', creating it
 as an INT if necessary. The loop then repeats: if the current value of
@@ -307,8 +302,7 @@ tracebacks remain deterministic.
 
 Functions are defined using the 'FUNC' keyword with explicit parameter and
 return types. The canonical positional-only form is
- 'FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R[ block ]' or
- 'FUNC name(T1:arg1, ..., TN:argN):R{ block }', where each 'Tk' and 'R' is
+ 'FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }', where each 'Tk' and 'R' is
  either 'INT' or 'STR'. Parameters may also declare a call-time default value
  using 'Tk:arg=expr'. A parameter without a default is positional; a parameter
  with a default is keyword-capable. Positional parameters must appear before
@@ -620,7 +614,7 @@ semantics as file-mode execution. The following rules describe REPL behaviour:
   immediately and return the supplied exit code (or '0' if omitted), identical
   to the behaviour when 'EXIT()' is executed in a file.
 - Multi-line buffering: if a statement begins a block (for example a 'FUNC'
-  definition or an 'IF(...)[' that spans multiple lines), the REPL buffers
+  definition or an 'IF(...){' that spans multiple lines), the REPL buffers
   lines until the block is complete (a blank line may be used to indicate
   end-of-entry when appropriate). When the buffer is complete the REPL parses
   and executes the collected statements as a unit.
@@ -836,17 +830,17 @@ Host and environment information:
 Control / Function / Statement Signatures (statement position)
 - Assignment: 'TYPE : identifier = expression' on first use; subsequent
   assignments omit TYPE but must match the original type
-- Block: '[ statement1 ... statementN ]' or '{ statement1 ... statementN }'
-- 'IF(condition)[ block ]'
-  (optional 'ELSIF(condition)[ block ]' ... 'ELSE[ block ]')
-- 'WHILE(condition)[ block ]'
-- 'FOR(counter, target)[ block ]' ; 'counter' initialized to 0, loop until
+- Block: '{ statement1 ... statementN }'
+- 'IF(condition){ block }'
+  (optional 'ELSIF(condition){ block }' ... 'ELSE{ block }')
+- 'WHILE(condition){ block }'
+- 'FOR(counter, INT: target){ block }' ; 'counter' initialized to 0, loop until
   counter >= target
-- 'FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R[ block ]' ; typed function
+'FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }' ; typed function
   definition with return type R; optional defaults use 'Tk:arg=expr' and must
   appear only after all positional parameters
-- 'RETURN(a)' ; return from function with value 'a'
-- 'BREAK(n)' ; break out of the innermost 'n' enclosing loops; raises a
+- 'RETURN(ANY: a)' ; return from function with value 'a'
+- 'BREAK(INT: n)' ; break out of the innermost 'n' enclosing loops; raises a
   runtime error if 'n' ≤ 0 or if 'n' is greater than the current loop nesting
   depth
 - 'CONTINUE()' ; skip remaining statements in the innermost loop iteration

@@ -289,14 +289,11 @@ class Parser:
 
     def _parse_block(self) -> Block:
         opening = self._peek().type
-        if opening == "LBRACKET":
-            start = self._consume("LBRACKET")
-            closing = "RBRACKET"
-        elif opening == "LBRACE":
+        if opening == "LBRACE":
             start = self._consume("LBRACE")
             closing = "RBRACE"
         else:
-            raise ASMParseError(f"Expected '[' or '{{' to start block but found {opening}")
+            raise ASMParseError(f"Expected '{{' to start block but found {opening}")
         statements: List[Statement] = self._parse_statements(stop_tokens={closing})
         self._consume(closing)
         return Block(location=self._location_from_token(start), statements=statements)
