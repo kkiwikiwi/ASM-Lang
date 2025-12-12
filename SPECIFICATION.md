@@ -287,6 +287,8 @@ Type notation: union signatures such as `INT|STR` restrict arguments to the list
 - `SLEN(STR: s):INT` returns the length of the supplied `STR` in characters as an `INT`. The argument must be a `STR`; passing an `INT` raises a runtime error.
 - `ILEN(INT: n):INT` returns the length in binary digits of the absolute value of the supplied `INT`. `ILEN(0)` returns 1. The argument must be an `INT`; passing a `STR` raises a runtime error.
 
+- `IN(ANY: value, TNS: tensor):INT` ; returns `1` if `value` is equal to any element of `tensor` (using the language's equality semantics), otherwise `0`.
+
 ### Arithmetic (`INT` only)
 - `ADD(INT: a, INT: b):INT` ; a + b
 - `SUB(INT: a, INT: b):INT` ; a - b

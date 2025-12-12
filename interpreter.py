@@ -329,6 +329,7 @@ class Builtins:
         self._register_custom("XOR", 2, 2, self._xor)
         self._register_custom("NOT", 1, 1, self._not)
         self._register_custom("EQ", 2, 2, self._eq)
+        self._register_custom("IN", 2, 2, self._in)
         self._register_int_only("GT", 2, lambda a, b: 1 if a > b else 0)
         self._register_int_only("LT", 2, lambda a, b: 1 if a < b else 0)
         self._register_int_only("GTE", 2, lambda a, b: 1 if a >= b else 0)
@@ -661,6 +662,19 @@ class Builtins:
             assert isinstance(b.value, Tensor)
             return Value(TYPE_INT, 1 if interpreter._tensor_equal(a.value, b.value) else 0)
         return Value(TYPE_INT, 1 if a.value == b.value else 0)
+
+    def _in(self, interpreter: "Interpreter", args: List[Value], __: List[Expression], ___: Environment, location: SourceLocation) -> Value:
+        # IN(ANY: value, TNS: tensor):INT -> 1 if value is contained anywhere in tensor, else 0
+        if len(args) != 2:
+            raise ASMRuntimeError("IN requires two arguments", location=location, rewrite_rule="IN")
+        needle, haystack = args
+        if haystack.type != TYPE_TNS:
+            raise ASMRuntimeError("IN requires a tensor as second argument", location=location, rewrite_rule="IN")
+        assert isinstance(haystack.value, Tensor)
+        for item in haystack.value.data.flat:
+            if interpreter._values_equal(needle, item):
+                return Value(TYPE_INT, 1)
+        return Value(TYPE_INT, 0)
 
     def _slice(self, _: "Interpreter", args: List[Value], __: List[Expression], ___: Environment, location: SourceLocation) -> Value:
         target, hi_val, lo_val = args
