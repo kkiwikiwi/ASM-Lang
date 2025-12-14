@@ -34,6 +34,7 @@ from parser import (
     Parser,
     Program,
     ReturnStatement,
+    DReturnStatement,
     SourceLocation,
     Statement,
     TensorLiteral,
@@ -1801,6 +1802,26 @@ class Interpreter:
                 closure=env,
             )
             return
+        if isinstance(statement, DReturnStatement):
+            frame: Frame = self.call_stack[-1]
+            if frame.name == "<top-level>":
+                raise ASMRuntimeError("DRETURN outside of function", location=statement.location, rewrite_rule="DRETURN")
+            # Expect identifier expression to delete a symbol
+            expr = statement.expression
+            if not isinstance(expr, Identifier):
+                raise ASMRuntimeError("DRETURN expects identifier", location=statement.location, rewrite_rule="DRETURN")
+            name = expr.name
+            try:
+                value = env.get(name)
+            except ASMRuntimeError as err:
+                err.location = statement.location
+                raise
+            try:
+                env.delete(name)
+            except ASMRuntimeError as err:
+                err.location = statement.location
+                raise
+            raise ReturnSignal(value)
         if isinstance(statement, ReturnStatement):
             frame: Frame = self.call_stack[-1]
             if frame.name == "<top-level>":

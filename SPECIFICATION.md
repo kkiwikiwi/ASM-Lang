@@ -95,6 +95,8 @@ Program termination is exposed via `EXIT`. `EXIT()` or `EXIT(code)` requests imm
 
 Memory-management and function-return behavior are also exposed via operators. `DEL(x)` deletes the variable `x` from the current environment, freeing its memory; any subsequent reference to `x` is an error unless `x` is re-assigned. `RETURN(a)`, when executed inside a function body, immediately terminates that function and returns the value of `a` to the caller. Executing `RETURN` outside of a function is a runtime error.
 
+`DRETURN(x)` is a convenience operator combining `RETURN` and `DEL`: when executed inside a function body it retrieves the current value of the identifier `x`, deletes the binding `x` from the environment (so subsequent references are an error), and returns the retrieved value to the caller. Using `DRETURN` outside of a function is a runtime error. If `x` is frozen or undefined, `DRETURN(x)` raises the same runtime errors as `DEL(x)` or a reference to `x` would.
+
 
 ## 5. Statements and Control Flow
 

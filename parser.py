@@ -92,6 +92,11 @@ class ReturnStatement(Statement):
 
 
 @dataclass
+class DReturnStatement(Statement):
+    expression: "Expression"
+
+
+@dataclass
 class BreakStatement(Statement):
     expression: "Expression"
 
@@ -192,6 +197,8 @@ class Parser:
             return self._parse_for()
         if token.type == "RETURN":
             return self._parse_return()
+        if token.type == "DRETURN":
+            return self._parse_dreturn()
         if token.type == "BREAK":
             return self._parse_break()
         if token.type == "CONTINUE":
@@ -289,6 +296,11 @@ class Parser:
         keyword = self._consume("RETURN")
         expression: Expression = self._parse_parenthesized_expression()
         return ReturnStatement(location=self._location_from_token(keyword), expression=expression)
+
+    def _parse_dreturn(self) -> DReturnStatement:
+        keyword = self._consume("DRETURN")
+        expression: Expression = self._parse_parenthesized_expression()
+        return DReturnStatement(location=self._location_from_token(keyword), expression=expression)
 
     def _parse_break(self) -> BreakStatement:
         keyword = self._consume("BREAK")
