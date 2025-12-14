@@ -27,7 +27,7 @@ KEYWORDS = {
     "FOR",
     "FUNC",
     "RETURN",
-    "DRETURN",
+    "POP",
     "BREAK",
     "CONTINUE",
     "GOTO",

@@ -2,6 +2,7 @@ IMPORT(prng)
 IMPORT(csprng)
 IMPORT(prime)
 IMPORT(decimal)
+IMPORT(path)
 IMPORT(waveforms)
 
 FUNC RUN_TESTS():INT{
@@ -53,6 +54,16 @@ FUNC RUN_TESTS():INT{
     ASSERT(EQ(decimal.DEC_TO_INT("-4"),-100))
 
     PRINT("Decimal library tests passed.")
+
+    # Path library tests
+    ASSERT( EQ(path.NORMALIZE_PATH("a\b\c"), "a/b/c") )
+    ASSERT( EQ(path.BASENAME("a/b/c.txt"), "c.txt") )
+    ASSERT( EQ(path.EXTNAME("foo.bar"), "bar") )
+    ASSERT( EQ(path.DELEXT("foo.bar"), "foo") )
+    ASSERT( EQ(path.EXTNAME("foo"), "") )
+    ASSERT( EQ(path.DELEXT("foo"), "foo") )
+
+    PRINT("Path library tests passed.")
 
     # Waveform library tests
     INT: freq = 1100100      # 100

@@ -34,7 +34,7 @@ from parser import (
     Parser,
     Program,
     ReturnStatement,
-    DReturnStatement,
+    PopStatement,
     SourceLocation,
     Statement,
     TensorLiteral,
@@ -329,6 +329,7 @@ class Builtins:
         self._register_custom("OR", 2, 2, self._or)
         self._register_custom("XOR", 2, 2, self._xor)
         self._register_custom("NOT", 1, 1, self._not)
+        self._register_custom("ARGV", 0, 0, self._argv)
         self._register_custom("EQ", 2, 2, self._eq)
         self._register_custom("IN", 2, 2, self._in)
         self._register_int_only("GT", 2, lambda a, b: 1 if a > b else 0)
@@ -345,12 +346,15 @@ class Builtins:
         self._register_custom("SLEN", 1, 1, self._slen)
         self._register_custom("ILEN", 1, 1, self._ilen)
         self._register_variadic("JOIN", 1, self._join)
+        self._register_custom("SPLIT", 1, 2, self._split)
         self._register_int_only("LOG", 1, self._safe_log)
         self._register_int_only("CLOG", 1, self._safe_clog)
         self._register_custom("INT", 1, 1, self._int_op)
         self._register_custom("STR", 1, 1, self._str_op)
         self._register_custom("UPPER", 1, 1, self._upper)
         self._register_custom("LOWER", 1, 1, self._lower)
+        self._register_custom("STRIP", 2, 2, self._strip)
+        self._register_custom("REPLACE", 3, 3, self._replace)
         self._register_custom("MAIN", 0, 0, self._main)
         self._register_custom("OS", 0, 0, self._os)
         self._register_custom("IMPORT", 1, 1, self._import)
@@ -669,6 +673,23 @@ class Builtins:
         bits = "".join("0" if v == 0 else format(v, "b") for v in ints)
         return Value(TYPE_INT, int(bits or "0", 2))
 
+    def _split(
+        self,
+        _: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        text = self._expect_str(args[0], "SPLIT", location)
+        delimiter = " " if len(args) == 1 else self._expect_str(args[1], "SPLIT", location)
+        if delimiter == "":
+            raise ASMRuntimeError("SPLIT delimiter must not be empty", location=location, rewrite_rule="SPLIT")
+
+        parts = text.split(delimiter)
+        data = np.array([Value(TYPE_STR, part) for part in parts], dtype=object)
+        return Value(TYPE_TNS, Tensor(shape=[len(parts)], data=data))
+
     # Boolean-like operators treating strings via emptiness
     def _and(self, _: "Interpreter", args: List[Value], __: List[Expression], ___: Environment, location: SourceLocation) -> Value:
         a, b = args
@@ -776,6 +797,37 @@ class Builtins:
         s = self._expect_str(args[0], "LOWER", location)
         # Convert ASCII letters to lower-case; other bytes are unchanged
         return Value(TYPE_STR, s.lower())
+
+    def _strip(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        # STRIP(STR: string, STR: remove):STR -> remove all occurrences of `remove` from `string`
+        s = self._expect_str(args[0], "STRIP", location)
+        rem = self._expect_str(args[1], "STRIP", location)
+        if rem == "":
+            raise ASMRuntimeError("STRIP: remove substring must not be empty", location=location, rewrite_rule="STRIP")
+        return Value(TYPE_STR, s.replace(rem, ""))
+
+    def _replace(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        # REPLACE(STR: string, STR: a, STR: b):STR -> replace all occurrences of `a` in `string` with `b`
+        s = self._expect_str(args[0], "REPLACE", location)
+        a = self._expect_str(args[1], "REPLACE", location)
+        b = self._expect_str(args[2], "REPLACE", location)
+        if a == "":
+            raise ASMRuntimeError("REPLACE: substring must not be empty", location=location, rewrite_rule="REPLACE")
+        return Value(TYPE_STR, s.replace(a, b))
 
     def _safe_log(self, value: int) -> int:
         if value <= 0:
@@ -1010,6 +1062,19 @@ class Builtins:
             interpreter.output_sink(text)
         interpreter.io_log.append({"event": "PRINT", "values": [arg.value for arg in args]})
         return Value(TYPE_INT, 0)
+
+    def _argv(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        ____: SourceLocation,
+    ) -> Value:
+        # Return the process argument vector as a 1-D TNS of STR values.
+        entries: List[str] = [str(s) for s in sys.argv]
+        data = np.array([Value(TYPE_STR, s) for s in entries], dtype=object)
+        return Value(TYPE_TNS, Tensor(shape=[len(data)], data=data))
 
     def _assert(
         self,
@@ -1891,14 +1956,14 @@ class Interpreter:
                 closure=env,
             )
             return
-        if isinstance(statement, DReturnStatement):
+        if isinstance(statement, PopStatement):
             frame: Frame = self.call_stack[-1]
             if frame.name == "<top-level>":
-                raise ASMRuntimeError("DRETURN outside of function", location=statement.location, rewrite_rule="DRETURN")
+                raise ASMRuntimeError("POP outside of function", location=statement.location, rewrite_rule="POP")
             # Expect identifier expression to delete a symbol
             expr = statement.expression
             if not isinstance(expr, Identifier):
-                raise ASMRuntimeError("DRETURN expects identifier", location=statement.location, rewrite_rule="DRETURN")
+                raise ASMRuntimeError("POP expects identifier", location=statement.location, rewrite_rule="POP")
             name = expr.name
             try:
                 value = env.get(name)

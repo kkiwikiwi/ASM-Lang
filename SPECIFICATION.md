@@ -87,9 +87,17 @@ After the module finishes executing the first time, the interpreter caches the m
 
 This caching behavior ensures that importing a module multiple times produces the same shared namespace instance for all importers. The interpreter does not automatically perform cycle detection beyond using the cached instance once execution has completed; careful module design should avoid import cycles where possible.
 
+`ARGV()` returns the interpreter's argument vector as a one-dimensional `TNS` of `STR`. The tensor's elements are the command-line argument strings supplied to the process, in the same order as the process `argv`, with index 1 holding the interpreter's invocation entry (TNS indices are 1-based). This lets programs inspect their launch arguments from within ASM-Lang.
+
 `ASSERT(a)` checks that its argument is true in the Boolean sense. If `a` is non-zero, execution proceeds normally; if `a` is `0`, the program crashes with an assertion failure.
 
 `BYTES(n)` converts a non-negative integer into its big-endian byte representation. The result is a one-dimensional `TNS` whose elements are `INT` values in the range `0..11111111` (0-255 decimal), ordered most-significant byte first. The tensor length is `max(1, ceil(bit_length(n)/8))`; `BYTES(0)` returns a single zero byte. Supplying a negative integer is a runtime error.
+
+`SPLIT(string, delimiter = " ")` splits `string` on the exact substring `delimiter` and returns the parts as a one-dimensional `TNS` of `STR`. The delimiter defaults to a single space. The delimiter must be non-empty; otherwise a runtime error is raised. Consecutive delimiters and trailing delimiters are preserved, so empty-string elements may appear in the result. The tensor length equals the number of resulting segments.
+
+`STRIP(string, remove)` returns a `STR` formed by removing every occurrence of the substring `remove` from `string`. The `remove` argument must be a non-empty string; supplying an empty `remove` raises a runtime error. `STRIP` does not mutate its inputs and always returns a new `STR` value.
+
+`REPLACE(string, a, b)` returns a `STR` formed by replacing every occurrence of the substring `a` in `string` with `b`. The `a` argument must be a non-empty string; supplying an empty `a` raises a runtime error. `REPLACE` does not mutate its inputs and always returns a new `STR` value.
 
 `MAIN()` returns `1` when the call site belongs to the primary program file (the file passed as the interpreter's first argument, or `<string>` when `-source` is used). It returns `0` when executed from code that came from an `IMPORT` (including nested imports). The result is determined solely by the source file that contains the call expression, not by the caller's call stack.
 
@@ -97,7 +105,7 @@ Program termination is exposed via `EXIT`. `EXIT()` or `EXIT(code)` requests imm
 
 Memory-management and function-return behavior are also exposed via operators. `DEL(x)` deletes the variable `x` from the current environment, freeing its memory; any subsequent reference to `x` is an error unless `x` is re-assigned. `RETURN(a)`, when executed inside a function body, immediately terminates that function and returns the value of `a` to the caller. Executing `RETURN` outside of a function is a runtime error.
 
-`DRETURN(x)` is a convenience operator combining `RETURN` and `DEL`: when executed inside a function body it retrieves the current value of the identifier `x`, deletes the binding `x` from the environment (so subsequent references are an error), and returns the retrieved value to the caller. Using `DRETURN` outside of a function is a runtime error. If `x` is frozen or undefined, `DRETURN(x)` raises the same runtime errors as `DEL(x)` or a reference to `x` would.
+`POP(x)` is a convenience operator combining `RETURN` and `DEL`: when executed inside a function body it retrieves the current value of the identifier `x`, deletes the binding `x` from the environment (so subsequent references are an error), and returns the retrieved value to the caller. Using `POP` outside of a function is a runtime error. If `x` is frozen or undefined, `POP(x)` raises the same runtime errors as `DEL(x)` or a reference to `x` would.
 
 
 ## 5. Statements and Control Flow
