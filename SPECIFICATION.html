@@ -1,3 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ASM-Lang SPECIFICATION</title>
+  <style>
+    body{background:#222;color:#99ddff;font-family:Open Sans, sans-serif;margin:0;padding:1rem}
+    .container{max-width:1000px;margin:0 auto;text-align:justify;text-justify:inter-word}
+    pre, code{background:#3c3c3c;color:inherit;font-family:Source Code Pro, monospace;padding:.25rem .5rem}
+    img{max-width:100%}
+  </style>
+</head>
+<body>
+  <div class="container" id="content">Rendering specification…</div>
+
+  <!-- Markdown source is embedded below. marked.js will render it into #content. -->
+  <script id="md" type="text/markdown">
 # Abstract State Machine Language Specification
 
 <style>
@@ -398,3 +416,17 @@ Tensor indexing uses the expression form `tensor[i1, i2, ..., iN]`. The number o
 - Built-ins are statically typed. Boolean contexts treat `INT` 0 as false and non-zero as true; `STR` is false when empty and true when non-empty unless a rule explicitly converts via `INT`. A `TNS` is true if any element is true by those `INT`/`STR` rules.
 - Argument evaluation order: left-to-right.
 - User-defined functions use the same call syntax as built-ins; keyword arguments are permitted only after positional arguments and only for parameters that declare defaults. Built-ins reject keyword arguments except that `READFILE` and `WRITEFILE` accept an optional `coding=` keyword. When a keyword parameter is omitted, its default expression is evaluated at call time in the function's defining environment.
+
+
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function(){
+      const md = document.getElementById('md').textContent;
+      const rendered = marked.parse(md);
+      document.getElementById('content').innerHTML = rendered;
+    });
+  </script>
+</body>
+</html>
