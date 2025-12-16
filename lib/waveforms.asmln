@@ -1,4 +1,15 @@
-# Waveform Generators
+# Waveform utilities
+#
+# API:
+# AUDIO_CLAMP(INT:v) -> INT
+# SQUARE(INT:freq, INT:ms, INT:amp, INT:sr) -> TNS
+# SAWTOOTH(INT:freq, INT:ms, INT:amp, INT:sr) -> TNS
+# TRIANGLE(INT:freq, INT:ms, INT:amp, INT:sr)
+# SINE(INT:freq, INT:ms, INT:amp, INT:sr) -> TNS
+# PULSE(INT:freq, INT:ms, INT:amp, INT:sr, INT:duty) -> TNS
+# ENVELOPE_ADSR(TNS:shape, INT:attack, INT:decay, INT:sustain, INT:release) -> TNS
+# LOWPASS(TNS:inp, INT:cutoff, INT:sr) -> TNS
+# HIGHPASS(TNS:inp, INT:cutoff, INT:sr) -> TNS
 
 # Constants / helpers local to this module.
 # MS_DEN is the number of milliseconds per second (1000).

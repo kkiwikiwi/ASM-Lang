@@ -1,4 +1,16 @@
 # Path utilities for ASM-Lang
+#
+# API:
+# NORMALIZE_PATH(STR: path) -> STR
+# BASEPATH(STR: path) -> STR
+# BASENAME(STR: path) -> STR
+# SPLITEXT(STR: path) -> TNS
+# EXTNAME(STR: path) -> STR
+# DELEXT(STR: path) -> STR
+# STR: interpreter
+# STR: interpreter_dir
+# STR: script
+# STR: script_dir
 
 FUNC NORMALIZE_PATH(STR: path):STR{
     RETURN(REPLACE(path,"\","/"))

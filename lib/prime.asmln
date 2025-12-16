@@ -1,4 +1,12 @@
-# Primality test for n
+# Primality and factorization functions
+#
+# API:
+# IS_PRIME(INT:n) -> INT
+# NEXT_PRIME(INT:start) -> INT
+# PREV_PRIME(INT:start) -> INT
+# IS_MERSENNE_PRIME(INT:p) -> INT
+# FACTOR(INT:n) -> TNS
+
 FUNC IS_PRIME(INT:n):INT{
     IF(LTE(n,1)){
         RETURN(0)

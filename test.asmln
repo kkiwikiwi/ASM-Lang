@@ -124,6 +124,8 @@ FUNC RUN_TESTS():INT{
     ASSERT(EQ(high[1], 0))
     ASSERT(EQ(high[11], 0))
 
+    PRINT("Waveform library tests passed.")
+
     # If we reach here all tests passed; print success code and return
     PRINT("All tests passed.")
     RETURN(0)

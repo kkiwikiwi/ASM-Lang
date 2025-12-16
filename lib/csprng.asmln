@@ -1,4 +1,10 @@
 #ChaCha20-based cryptographically secure pseudorandom number generator
+#
+# API:
+# CS_PRNG_SEED(INT:seed) -> INT
+# CS_PRNG_NEXT() -> INT
+# CS_PRNG_RANGE(INT:max) -> INT
+# CS_PRNG_RANGE_MIN_MAX(INT:min, INT:max) -> INT
 
 INT: MASK32 = SUB( POW(10,100000), 1 )  # 2^32-1
 

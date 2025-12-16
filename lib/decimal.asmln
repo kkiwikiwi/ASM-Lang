@@ -1,4 +1,10 @@
 # Decimal <-> binary helpers
+#
+# API:
+# DEC_CHAR_TO_INT(STR:ch) -> INT
+# INT_TO_DEC_CHAR(INT:d) -> STR
+# DEC_TO_INT(STR:s) -> INT
+# INT_TO_DEC(INT:n) -> STR
 
 INT: DEC_BASE = 1010  # 10
 
