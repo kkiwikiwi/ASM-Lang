@@ -1289,6 +1289,82 @@ class Builtins:
             except OSError:
                 raise ASMRuntimeError(f"Failed to import '{module_name}': {exc}", location=location, rewrite_rule="IMPORT")
 
+        # --- IMPORT-time extension loading ---
+        # When importing a module, attempt to load any companion extensions so
+        # their operators are available immediately. Look for a companion
+        # pointer file (<module>.asmxt) next to the module file (or the copy
+        # in the interpreter's lib/), and also check the interpreter's built-in
+        # ext/ directory for an <module>.py extension module.
+        try:
+            import extensions as _extmod
+
+            # If a companion .asmxt exists alongside the module, load listed extensions.
+            companion_asmxt = os.path.splitext(module_path)[0] + ".asmxt"
+            if os.path.exists(companion_asmxt):
+                try:
+                    asm_paths = _extmod.read_asmx(companion_asmxt)
+                    for p in _extmod.gather_extension_paths(asm_paths):
+                        mod = _extmod.load_extension_module(p)
+                        api_version = getattr(mod, "ASM_LANG_EXTENSION_API_VERSION", _extmod.EXTENSION_API_VERSION)
+                        if api_version != _extmod.EXTENSION_API_VERSION:
+                            raise ASMExtensionError(
+                                f"Extension {p} requires API {api_version}, host supports {_extmod.EXTENSION_API_VERSION}"
+                            )
+                        register = getattr(mod, "asm_lang_register", None)
+                        if register is None or not callable(register):
+                            raise ASMExtensionError(f"Extension {p} must define callable asm_lang_register(ext)")
+                        ext_name = getattr(mod, "ASM_LANG_EXTENSION_NAME", os.path.splitext(os.path.basename(p))[0])
+                        ext_asmodule = bool(getattr(mod, "ASM_LANG_EXTENSION_ASMODULE", False))
+                        ext_api = _extmod.ExtensionAPI(services=interpreter.services, ext_name=str(ext_name), asmodule=ext_asmodule)
+                        before = len(interpreter.services.operators)
+                        register(ext_api)
+                        # Register any newly-added operators into the running interpreter
+                        for name, min_args, max_args, impl, _doc in interpreter.services.operators[before:]:
+                            # Avoid duplicate registration when the same extension is loaded again
+                            if name in interpreter.builtins.table:
+                                continue
+                            interpreter.builtins.register_extension_operator(
+                                name=name,
+                                min_args=min_args,
+                                max_args=max_args,
+                                impl=impl,
+                            )
+                except ASMExtensionError as exc:
+                    raise ASMExtensionError(f"Failed to load extensions from {companion_asmxt}: {exc}") from exc
+
+            # Next, check for a single-file built-in extension named <module>.py
+            builtin = _extmod._resolve_in_builtin_ext(f"{module_name}.py")
+            if builtin is not None and os.path.exists(builtin):
+                mod = _extmod.load_extension_module(builtin)
+                api_version = getattr(mod, "ASM_LANG_EXTENSION_API_VERSION", _extmod.EXTENSION_API_VERSION)
+                if api_version != _extmod.EXTENSION_API_VERSION:
+                    raise ASMExtensionError(
+                        f"Extension {builtin} requires API {api_version}, host supports {_extmod.EXTENSION_API_VERSION}"
+                    )
+                register = getattr(mod, "asm_lang_register", None)
+                if register is not None and callable(register):
+                    ext_name = getattr(mod, "ASM_LANG_EXTENSION_NAME", os.path.splitext(os.path.basename(builtin))[0])
+                    ext_asmodule = bool(getattr(mod, "ASM_LANG_EXTENSION_ASMODULE", False))
+                    ext_api = _extmod.ExtensionAPI(services=interpreter.services, ext_name=str(ext_name), asmodule=ext_asmodule)
+                    before = len(interpreter.services.operators)
+                    register(ext_api)
+                    for name, min_args, max_args, impl, _doc in interpreter.services.operators[before:]:
+                        if name in interpreter.builtins.table:
+                            continue
+                        interpreter.builtins.register_extension_operator(
+                            name=name,
+                            min_args=min_args,
+                            max_args=max_args,
+                            impl=impl,
+                        )
+        except ASMExtensionError as exc:
+            raise ASMRuntimeError(str(exc), location=location, rewrite_rule="IMPORT")
+        except Exception:
+            # Non-fatal: do not prevent importing the asm module if extension
+            # loading fails unexpectedly; convert to runtime error only when
+            # it's an ASMExtensionError above.
+            pass
+
         lexer = Lexer(source_text, module_path)
         tokens = lexer.tokenize()
         parser = Parser(tokens, module_path, source_text.splitlines(), type_names=interpreter.type_registry.names())

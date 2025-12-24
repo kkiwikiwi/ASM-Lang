@@ -1,0 +1,42 @@
+# Image loading helpers for ASM-Lang
+# Backed by ext/image.py (stdlib-only, prefers Windows GDI+).
+#
+# API (operators provided by the extension):
+# LOAD_PNG(STR: path)  -> TNS[height][width][r,g,b,a]
+# LOAD_JPEG(STR: path) -> TNS[height][width][r,g,b,a]
+# LOAD_BMP(STR: path)  -> TNS[height][width][r,g,b,a]
+#
+# The returned tensor layout is [row][column][channel] with 1-based indexing
+# in user code. Channels are ordered r,g,b,a and values are 0..255.
+
+FUNC IMG_WIDTH(TNS: img):INT{
+	RETURN(TLEN(img, 10))
+}
+
+FUNC IMG_HEIGHT(TNS: img):INT{
+	RETURN(TLEN(img, 1))
+}
+
+FUNC IMG_CHANNELS(TNS: img):INT{
+	RETURN(TLEN(img, 11))
+}
+
+FUNC IMG_PIXEL(TNS: img, INT: x, INT: y):TNS{
+	RETURN(img[y][x])
+}
+
+FUNC IMG_R(TNS: img, INT: x, INT: y):INT{
+	RETURN(img[y][x][1])
+}
+
+FUNC IMG_G(TNS: img, INT: x, INT: y):INT{
+	RETURN(img[y][x][10])
+}
+
+FUNC IMG_B(TNS: img, INT: x, INT: y):INT{
+	RETURN(img[y][x][11])
+}
+
+FUNC IMG_A(TNS: img, INT: x, INT: y):INT{
+	RETURN(img[y][x][100])
+}

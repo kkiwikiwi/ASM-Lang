@@ -3,6 +3,7 @@ IMPORT(csprng)
 IMPORT(prime)
 IMPORT(decimal)
 IMPORT(path)
+IMPORT(image)
 IMPORT(waveforms)
 IMPORT(stats)
 
@@ -162,6 +163,16 @@ FUNC RUN_TESTS():INT{
     ASSERT( EQ( desc1[101], 11 ) )          # max
 
     PRINT("Stats library tests passed.")
+
+    # image library (load sample BMP)
+    STR: bmp_path = JOIN(path.interpreter_dir,"icon.bmp")
+    STR: png_path = JOIN(path.interpreter_dir,"icon.png")
+    STR: jpeg_path = JOIN(path.interpreter_dir,"icon.jpg")
+    TNS: bmp = image.LOAD_BMP(bmp_path)
+    TNS: png = image.LOAD_PNG(png_path)
+    TNS: jpeg = image.LOAD_JPEG(jpeg_path)
+    ASSERT(EQ(bmp, png))
+    PRINT("image library tests passed.")
 
     # Extension tests (requires interpreter to be started with these extensions loaded)
     PRINT()

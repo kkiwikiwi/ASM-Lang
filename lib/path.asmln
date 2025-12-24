@@ -16,10 +16,10 @@ FUNC NORMALIZE_PATH(STR: path):STR{
     RETURN(REPLACE(path,"\","/"))
 }
 
-FUNC BASEPATH(STR: path):STR{
+FUNC BASEPATH(STR: path):STR{ # returns directory portion of path
     TNS: tpath = SPLIT(NORMALIZE_PATH(path), "/")
     STR: abspath = ""
-    FOR(i,SUB(TLEN(tpath,1),1) ){
+    FOR(i,TLEN(tpath,1) ){
         IF(EQ(i,0)){CONTINUE()}
         abspath = JOIN(abspath,tpath[i],"/")
     }
@@ -27,14 +27,14 @@ FUNC BASEPATH(STR: path):STR{
     POP(abspath)
 }
 
-FUNC BASENAME(STR: path):STR{
+FUNC BASENAME(STR: path):STR{ # returns filename portion of path
     TNS: tpath = SPLIT(NORMALIZE_PATH(path), "/")
     STR: basename = tpath[MAX(TLEN(tpath,1),1)]
     DEL(tpath)
     POP(basename)
 }
 
-FUNC SPLITEXT(STR: path):TNS{
+FUNC SPLITEXT(STR: path):TNS{ # returns [name without ext, ext]
     STR: npath = NORMALIZE_PATH(path)
     STR: base = BASENAME(npath)
     STR: dir = BASEPATH(npath)
@@ -64,11 +64,11 @@ FUNC SPLITEXT(STR: path):TNS{
     POP(result)
 }
 
-FUNC EXTNAME(STR: path):STR{
+FUNC EXTNAME(STR: path):STR{ # returns extension portion of path
     RETURN(SPLITEXT(path)[10])
 }
 
-FUNC DELEXT(STR: path):STR{
+FUNC DELEXT(STR: path):STR{ # returns path without extension
     RETURN(SPLITEXT(path)[1])
 }
 
