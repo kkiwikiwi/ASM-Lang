@@ -164,14 +164,46 @@ FUNC RUN_TESTS():INT{
 
     PRINT("Stats library tests passed.")
 
-    # image library (load sample BMP)
-    STR: bmp_path = JOIN(path.interpreter_dir,"icon.bmp")
-    STR: png_path = JOIN(path.interpreter_dir,"icon.png")
-    STR: jpeg_path = JOIN(path.interpreter_dir,"icon.jpg")
+    # image library
+    STR: bmp_path = JOIN(path.interpreter_dir,"/icon.bmp")
+    STR: png_path = JOIN(path.interpreter_dir,"/icon.png")
+    STR: jpeg_path = JOIN(path.interpreter_dir,"/icon.jpg")
     TNS: bmp = image.LOAD_BMP(bmp_path)
     TNS: png = image.LOAD_PNG(png_path)
     TNS: jpeg = image.LOAD_JPEG(jpeg_path)
     ASSERT(EQ(bmp, png))
+    ASSERT(EQ(image.FLIP_V(image.FLIP_V(bmp)), bmp))
+    ASSERT(EQ(image.FLIP_H(image.FLIP_H(bmp)), bmp))
+    ASSERT(EQ(image.WIDTH(bmp), 10101010))
+    ASSERT(EQ(image.HEIGHT(bmp), 10101010))
+    ASSERT(EQ(image.CHANNELS(bmp), 100))
+
+    # Pixel / channel access consistency
+    TNS: p = image.PIXEL(bmp, 1, 1)
+    ASSERT(EQ(p[1], image.R(bmp, 1, 1)))
+    ASSERT(EQ(p[10], image.G(bmp, 1, 1)))
+    ASSERT(EQ(p[11], image.B(bmp, 1, 1)))
+    ASSERT(EQ(p[100], image.A(bmp, 1, 1)))
+
+    # Double-invert returns original
+    ASSERT(EQ(image.INVERT(image.INVERT(bmp)), bmp))
+
+    # Scale (identity) preserves dimensions
+    TNS: scaled = image.SCALE(bmp, 1, 1, 1)
+    ASSERT(EQ(image.WIDTH(scaled), image.WIDTH(bmp)))
+    ASSERT(EQ(image.HEIGHT(scaled), image.HEIGHT(bmp)))
+
+    # Blit into an empty canvas and verify top-left pixel copied
+    TNS: canvas = TNS(SHAPE(bmp), 0)
+    TNS: canv2 = image.BLIT(bmp, canvas, 1, 1)
+    ASSERT(EQ(canv2[1,1,1], bmp[1,1,1]))
+
+    # Grayscale / Blur run and preserve height
+    TNS: gray = image.GRAYSCALE(bmp)
+    ASSERT(EQ(TLEN(gray, 1), TLEN(bmp, 1)))
+    TNS: blurred = image.BLUR(bmp, 1)
+    ASSERT(EQ(TLEN(blurred, 1), TLEN(bmp, 1)))
+
     PRINT("image library tests passed.")
 
     # Extension tests (requires interpreter to be started with these extensions loaded)

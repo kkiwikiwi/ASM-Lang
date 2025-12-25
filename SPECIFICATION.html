@@ -398,6 +398,8 @@ Tensor indexing uses the expression form `tensor[i1, i2, ..., iN]`. The number o
 ### Tensor operations
 - `SHAPE(TNS: tensor):TNS` — Returns the tensor's shape as a 1D `TNS` (vector) of `INT` lengths (one entry per dimension).
 - `TLEN(TNS: tensor, INT: dim):INT` — Returns the length of the specified 1-based dimension. Errors if `dim` is out of range.
+- `FLIP(INT|STR: obj):INT|STR` — For `INT` input, returns an `INT` whose binary-digit spelling is the reverse of the absolute-value binary spelling of `obj` (sign is preserved). For `STR` input, returns the character-reversed `STR`.
+- `TFLIP(TNS: obj, INT: dim):TNS` — Returns a new `TNS` with the elements along 1-based dimension `dim` reversed. Errors if `dim` is out of range.
 - `FILL(TNS: tensor, ANY: value):TNS` — Returns a new tensor with the same shape as `tensor`, filled with `value`. The supplied value`s type must match the existing element type at every position.
 - `TNS(TNS: shape, ANY: value):TNS` — Creates a new `TNS` with the shape described by a 1D `TNS` of positive `INT` lengths, filled with `value`.
 - `MADD/MSUB/MMUL/MDIV(TNS: x, TNS: y):TNS` — Elementwise addition, subtraction, multiplication, and division. Shapes must match; all elements must be `INT` or all `FLT` (no mixing). Division by zero is an error.

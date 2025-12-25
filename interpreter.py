@@ -410,6 +410,8 @@ class Builtins:
         self._register_custom("TMUL", 2, 2, self._tmul)
         self._register_custom("TDIV", 2, 2, self._tdiv)
         self._register_custom("TPOW", 2, 2, self._tpow)
+        self._register_custom("FLIP", 1, 1, self._flip)
+        self._register_custom("TFLIP", 2, 2, self._tflip)
 
     def _register_int_only(self, name: str, arity: int, func: Callable[..., int]) -> None:
         def impl(_: "Interpreter", args: List[Value], __: List[Expression], ___: Environment, location: SourceLocation) -> Value:
@@ -2218,6 +2220,54 @@ class Builtins:
         result = self._map_tensor_numeric_scalar(tensor, scalar, "TPOW", location, _pow_int, _pow_flt)
         return Value(TYPE_TNS, result)
 
+    def _flip(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        """FLIP(INT|STR: obj):INT|STR
+        - INT: reverse the binary-digit spelling of the absolute value and preserve sign
+        - STR: reverse the character sequence
+        """
+        val = args[0]
+        if val.type == TYPE_INT:
+            n = self._expect_int(val, "FLIP", location)
+            neg = n < 0
+            a = abs(n)
+            bits = format(a, "b")
+            rev = bits[::-1]
+            result = int(rev, 2) if rev != "" else 0
+            return Value(TYPE_INT, -result if neg else result)
+        if val.type == TYPE_STR:
+            s = self._expect_str(val, "FLIP", location)
+            return Value(TYPE_STR, s[::-1])
+        raise ASMRuntimeError("FLIP expects INT or STR", location=location, rewrite_rule="FLIP")
+
+    def _tflip(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        __: List[Expression],
+        ___: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        """TFLIP(TNS: obj, INT: dim):TNS
+        Return a new tensor with dimension `dim` reversed (1-based).
+        """
+        tensor = self._expect_tns(args[0], "TFLIP", location)
+        dim = self._expect_int(args[1], "TFLIP", location)
+        if dim <= 0 or dim > len(tensor.shape):
+            raise ASMRuntimeError("TFLIP dimension out of range", location=location, rewrite_rule="TFLIP")
+        axis = dim - 1
+        # reshape the flat data into the tensor shape, flip along axis, then flatten
+        reshaped = tensor.data.reshape(tuple(tensor.shape))
+        flipped = np.flip(reshaped, axis=axis)
+        new_data = np.array(list(flipped.flat), dtype=object)
+        return Value(TYPE_TNS, Tensor(shape=list(tensor.shape), data=new_data))
+
     def _cl(
         self,
         interpreter: "Interpreter",
@@ -2464,6 +2514,20 @@ class Interpreter:
         # re-registered if necessary without re-running module code.
         self.module_functions: Dict[str, List[Function]] = {}
 
+    # Convenience wrappers so extensions can call interpreter._expect_*
+    # directly. Delegate to the builtins helpers which implement the
+    # concrete checks and error reporting.
+    def _expect_tns(self, value: "Value", rule: str, location: SourceLocation) -> "Tensor":
+        return self.builtins._expect_tns(value, rule, location)
+
+    def _expect_int(self, value: "Value", rule: str, location: SourceLocation) -> int:
+        return self.builtins._expect_int(value, rule, location)
+
+    def _expect_flt(self, value: "Value", rule: str, location: SourceLocation) -> float:
+        return self.builtins._expect_flt(value, rule, location)
+
+    def _expect_str(self, value: "Value", rule: str, location: SourceLocation) -> str:
+        return self.builtins._expect_str(value, rule, location)
     def parse(self) -> Program:
         lexer = Lexer(self.source, self.filename)
         tokens = lexer.tokenize()
@@ -2716,8 +2780,11 @@ class Interpreter:
     def _execute_for(self, statement: ForStatement, env: Environment) -> None:
         target_val = self._evaluate_expression(statement.target_expr, env)
         target = self._expect_int(target_val, "FOR", statement.location)
-        env.set(statement.counter, Value(TYPE_INT, 0), declared_type=TYPE_INT)
-        while self._expect_int(env.get(statement.counter), "FOR", statement.location) < target:
+        # FOR loops use 1-indexed counters (language-level). Initialize
+        # counter to 1 and iterate while counter <= target so library code
+        # that indexes tensors with the loop variable works correctly.
+        env.set(statement.counter, Value(TYPE_INT, 1), declared_type=TYPE_INT)
+        while self._expect_int(env.get(statement.counter), "FOR", statement.location) <= target:
             try:
                 self._execute_block(statement.block.statements, env)
             except BreakSignal as bs:
@@ -2728,7 +2795,7 @@ class Interpreter:
             except ContinueSignal:
                 # For FOR loops, increment the counter and decide whether to continue
                 current = self._expect_int(env.get(statement.counter), "FOR", statement.location)
-                if current + 1 < target:
+                if current + 1 <= target:
                     env.set(statement.counter, Value(TYPE_INT, current + 1))
                     continue
                 # no further iterations -> behave like BREAK(1)

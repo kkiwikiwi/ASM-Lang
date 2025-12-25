@@ -17,14 +17,13 @@ FUNC NORMALIZE_PATH(STR: path):STR{
 }
 
 FUNC BASEPATH(STR: path):STR{ # returns directory portion of path
-    TNS: tpath = SPLIT(NORMALIZE_PATH(path), "/")
-    STR: abspath = ""
-    FOR(i,TLEN(tpath,1) ){
-        IF(EQ(i,0)){CONTINUE()}
-        abspath = JOIN(abspath,tpath[i],"/")
+    STR: npath = NORMALIZE_PATH(path)
+    STR: base = BASENAME(npath)
+    IF(EQ(base, "")){
+        POP("")
     }
-    DEL(tpath)
-    POP(abspath)
+    STR: dir = REPLACE(npath, JOIN("/", base), "")
+    POP(dir)
 }
 
 FUNC BASENAME(STR: path):STR{ # returns filename portion of path
@@ -54,13 +53,15 @@ FUNC SPLITEXT(STR: path):TNS{ # returns [name without ext, ext]
     IF(EQ(dir, "")){
         delex = name
     } ELSE {
-        delex = JOIN(dir, name)
+        IF( OR( EQ(dir, npath), EQ(dir, JOIN(npath, "/")) ) ){
+            delex = name
+        } ELSE {
+            delex = JOIN(dir, name)
+        }
     }
     DEL(dir)
     DEL(name)
     TNS: result = [delex, ext]
-    DEL(ext)
-    DEL(delex)
     POP(result)
 }
 
