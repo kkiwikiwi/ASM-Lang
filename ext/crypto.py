@@ -78,6 +78,12 @@ def _make_str(s: str):
     return Value(TYPE_STR, str(s))
 
 
+def _make_int(n: int):
+    from interpreter import TYPE_INT, Value
+
+    return Value(TYPE_INT, int(n))
+
+
 def _make_keypair_tns(public_pem: str, private_pem: str):
     from interpreter import TYPE_STR, TYPE_TNS, Tensor, Value
 
@@ -124,14 +130,31 @@ def _bytes_to_hex(_interpreter, args, _arg_nodes, _env, location):
     return _make_str(data.hex())
 
 
+def _crypto_zero(_interpreter, args, _arg_nodes, _env, location):
+    from interpreter import ASMRuntimeError, TYPE_INT, TYPE_TNS, Tensor, Value
+
+    v = args[0]
+    if getattr(v, "type", None) != TYPE_TNS or not isinstance(v.value, Tensor):
+        raise ASMRuntimeError("CRYPTO_ZERO expects TNS byte array", location=location, rewrite_rule="CRYPTO_ZERO")
+    tensor = v.value
+    if len(tensor.shape) != 1:
+        raise ASMRuntimeError("CRYPTO_ZERO expects a 1D tensor", location=location, rewrite_rule="CRYPTO_ZERO")
+    for i in range(tensor.data.size):
+        entry = tensor.data.flat[i]
+        if getattr(entry, "type", None) != TYPE_INT:
+            raise ASMRuntimeError("CRYPTO_ZERO tensor entries must be INT", location=location, rewrite_rule="CRYPTO_ZERO")
+        tensor.data.flat[i] = Value(TYPE_INT, 0)
+    return _make_int(0)
+
+
 def _aes_gcm_encrypt(_interpreter, args, _arg_nodes, _env, location):
     from interpreter import ASMRuntimeError
 
     key = _tns_to_bytes(args[0], "AES_GCM_ENCRYPT", location)
     _require_key_length(key, "AES_GCM_ENCRYPT", location)
     iv = _tns_to_bytes(args[1], "AES_GCM_ENCRYPT", location)
-    if not iv:
-        raise ASMRuntimeError("AES_GCM_ENCRYPT expects non-empty IV", location=location, rewrite_rule="AES_GCM_ENCRYPT")
+    if len(iv) != 12:
+        raise ASMRuntimeError("AES_GCM_ENCRYPT expects 12-byte IV", location=location, rewrite_rule="AES_GCM_ENCRYPT")
     plaintext = _tns_to_bytes(args[2], "AES_GCM_ENCRYPT", location)
     aad = _tns_to_bytes(args[3], "AES_GCM_ENCRYPT", location) if len(args) > 3 else b""
     try:
@@ -147,8 +170,8 @@ def _aes_gcm_decrypt(_interpreter, args, _arg_nodes, _env, location):
     key = _tns_to_bytes(args[0], "AES_GCM_DECRYPT", location)
     _require_key_length(key, "AES_GCM_DECRYPT", location)
     iv = _tns_to_bytes(args[1], "AES_GCM_DECRYPT", location)
-    if not iv:
-        raise ASMRuntimeError("AES_GCM_DECRYPT expects non-empty IV", location=location, rewrite_rule="AES_GCM_DECRYPT")
+    if len(iv) != 12:
+        raise ASMRuntimeError("AES_GCM_DECRYPT expects 12-byte IV", location=location, rewrite_rule="AES_GCM_DECRYPT")
     ciphertext = _tns_to_bytes(args[2], "AES_GCM_DECRYPT", location)
     aad = _tns_to_bytes(args[3], "AES_GCM_DECRYPT", location) if len(args) > 3 else b""
     try:
@@ -214,8 +237,8 @@ def _rsa_keygen(_interpreter, args, _arg_nodes, _env, location):
 
     bits = _expect_int(args[0], "RSA_KEYGEN", location)
     exponent = _expect_int(args[1], "RSA_KEYGEN", location) if len(args) > 1 else 65537
-    if bits < 1024:
-        raise ASMRuntimeError("RSA_KEYGEN requires at least 1024 bits", location=location, rewrite_rule="RSA_KEYGEN")
+    if bits < 2048:
+        raise ASMRuntimeError("RSA_KEYGEN requires at least 2048 bits", location=location, rewrite_rule="RSA_KEYGEN")
     try:
         key = rsa.generate_private_key(public_exponent=exponent, key_size=bits)
         priv_bytes = key.private_bytes(
@@ -297,6 +320,7 @@ def asm_lang_register(ext: ExtensionAPI) -> None:
     ext.register_operator("CRYPTO_RANDOM", 1, 1, _crypto_random, doc="CRYPTO_RANDOM(n) -> TNS bytes")
     ext.register_operator("CRYPTO_HEX_TO_BYTES", 1, 1, _hex_to_bytes, doc="CRYPTO_HEX_TO_BYTES(hex) -> TNS bytes")
     ext.register_operator("CRYPTO_BYTES_TO_HEX", 1, 1, _bytes_to_hex, doc="CRYPTO_BYTES_TO_HEX(bytes) -> STR hex")
+    ext.register_operator("CRYPTO_ZERO", 1, 1, _crypto_zero, doc="CRYPTO_ZERO(bytes) -> 0 (best-effort overwrite)")
     ext.register_operator("AES_GCM_ENCRYPT", 3, 4, _aes_gcm_encrypt, doc="AES_GCM_ENCRYPT(key, iv, pt[, aad]) -> TNS (ct||tag)")
     ext.register_operator("AES_GCM_DECRYPT", 3, 4, _aes_gcm_decrypt, doc="AES_GCM_DECRYPT(key, iv, ct||tag[, aad]) -> TNS")
     ext.register_operator("AES_CBC_ENCRYPT", 3, 4, _aes_cbc_encrypt, doc="AES_CBC_ENCRYPT(key, iv, pt[, pad]) -> TNS")

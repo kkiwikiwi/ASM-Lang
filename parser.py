@@ -174,7 +174,7 @@ class Parser:
         self.tokens = tokens
         self.filename = filename
         self.source_lines = source_lines
-        self.type_names = set(type_names) if type_names is not None else {"INT", "FLT", "STR", "TNS"}
+        self.type_names = set(type_names) if type_names is not None else {"INT", "FLT", "STR", "TNS", "FN"}
         self.index = 0
 
     def _parse_flt_literal(self, raw: str, *, token: Token) -> float:

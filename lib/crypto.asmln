@@ -11,6 +11,10 @@ FUNC BYTES_TO_HEX(TNS: bytes):STR{
     RETURN(crypto.CRYPTO_BYTES_TO_HEX(bytes))
 }
 
+FUNC ZERO_BYTES(TNS: bytes):INT{
+    RETURN(crypto.CRYPTO_ZERO(bytes))
+}
+
 FUNC AES_GCM_ENCRYPT_HEX(STR: key_hex, STR: iv_hex, STR: plaintext_hex, STR: aad_hex=""):STR{
     TNS: key = crypto.CRYPTO_HEX_TO_BYTES(key_hex)
     TNS: iv = crypto.CRYPTO_HEX_TO_BYTES(iv_hex)

@@ -1,0 +1,37 @@
+FUNC INC(INT:x):INT{
+    RETURN(ADD(x,1))
+}
+
+FUNC DEC(INT:x):INT{
+    RETURN(SUB(x,1))
+}
+
+FUNC APPLY(FN: fn, INT: value):INT{
+    RETURN(fn(value))
+}
+
+FUNC PICK(INT: flag):FN{
+    IF(flag){
+        RETURN(INC)
+    }
+    RETURN(DEC)
+}
+
+FN: f_inc = INC
+INT: a = f_inc(1)
+ASSERT(EQ(a,10))
+
+INT: b = APPLY(DEC, 1)
+ASSERT(EQ(b, 0))
+
+FN: chosen = PICK(1)
+INT: c = chosen(1)
+ASSERT(EQ(c,10))
+
+TNS: ops = [ADD, SUB]
+FN: op = ops[1]
+INT: d = op(1,1)
+ASSERT(EQ(d,10))
+
+ASSERT(EQ(ADD, ADD))
+ASSERT(EQ(EQ(ADD, SUB), 0))

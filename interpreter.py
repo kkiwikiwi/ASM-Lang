@@ -50,6 +50,7 @@ TYPE_INT = "INT"
 TYPE_FLT = "FLT"
 TYPE_STR = "STR"
 TYPE_TNS = "TNS"
+TYPE_FN = "FN"
 
 # On Windows, command lines over a certain length cause CreateProcess errors
 WINDOWS_COMMAND_LENGTH_LIMIT = 8000
@@ -184,6 +185,8 @@ class Environment:
             if val.type == TYPE_TNS and isinstance(val.value, Tensor):
                 dims = ",".join(str(d) for d in val.value.shape)
                 return f"{val.type}:[{dims}]"
+            if val.type == TYPE_FN and isinstance(val.value, FunctionRef):
+                return f"{val.type}:{val.value.display_name()}"
             try:
                 rendered = str(val.value)
             except Exception:
@@ -227,6 +230,16 @@ class Function:
     return_type: str
     body: Block
     closure: Environment
+
+
+@dataclass(frozen=True)
+class FunctionRef:
+    name: str
+    function: Optional[Function] = None
+    builtin: bool = False
+
+    def display_name(self) -> str:
+        return self.name
 
 
 @dataclass
@@ -388,6 +401,7 @@ class Builtins:
         self._register_custom("ISFLT", 1, 1, self._isflt)
         self._register_custom("ISSTR", 1, 1, self._isstr)
         self._register_custom("ISTNS", 1, 1, self._istns)
+        self._register_custom("ISFN", 1, 1, self._isfn)
         self._register_custom("ROUND", 1, 3, self._round)
         self._register_custom("READFILE", 1, 2, self._readfile)
         self._register_custom("BYTES", 1, 1, self._bytes)
@@ -1766,6 +1780,26 @@ class Builtins:
             raise
         return Value(TYPE_INT, 1 if val.type == TYPE_TNS else 0)
 
+    def _isfn(
+        self,
+        interpreter: "Interpreter",
+        args: List[Value],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        if not arg_nodes or not isinstance(arg_nodes[0], Identifier):
+            raise ASMRuntimeError("ISFN requires an identifier argument", location=location, rewrite_rule="ISFN")
+        name = arg_nodes[0].name
+        if not env.has(name):
+            return Value(TYPE_INT, 0)
+        try:
+            val = env.get(name)
+        except ASMRuntimeError as err:
+            err.location = location
+            raise
+        return Value(TYPE_INT, 1 if val.type == TYPE_FN else 0)
+
     def _frozen(
         self,
         interpreter: "Interpreter",
@@ -2436,7 +2470,7 @@ class Interpreter:
         self.output_sink = output_sink or (lambda text: print(text))
         self.builtins = Builtins()
 
-        # Install built-in types (INT/STR/TNS) into the registry with their
+        # Install built-in types (INT/FLT/STR/TNS/FN) into the registry with their
         # concrete runtime behavior. These names are reserved by default
         # services so extensions cannot redefine them.
         if not self.type_registry.has(TYPE_INT):
@@ -2501,6 +2535,35 @@ class Interpreter:
                     condition_int=lambda ctx, v: 1 if ctx.interpreter._tensor_truthy(v.value) else 0,
                     to_str=lambda ctx, v: "<tensor>",
                     equals=lambda ctx, a, b: ctx.interpreter._tensor_equal(a.value, b.value),
+                ),
+                seal=True,
+            )
+
+        if not self.type_registry.has(TYPE_FN):
+            def _fn_to_str(ctx: TypeContext, v: Value) -> str:
+                ref = v.value
+                if isinstance(ref, FunctionRef):
+                    return f"<fn {ref.display_name()}>"
+                return "<fn>"
+
+            def _fn_equals(ctx: TypeContext, a: Value, b: Value) -> bool:
+                left = a.value
+                right = b.value
+                if not isinstance(left, FunctionRef) or not isinstance(right, FunctionRef):
+                    return False
+                if left.builtin != right.builtin:
+                    return False
+                if left.builtin:
+                    return left.name == right.name
+                return left.function is right.function
+
+            self.type_registry.register(
+                TypeSpec(
+                    name=TYPE_FN,
+                    printable=True,
+                    condition_int=lambda ctx, v: 1,
+                    to_str=_fn_to_str,
+                    equals=_fn_equals,
                 ),
                 seal=True,
             )
@@ -2951,6 +3014,26 @@ class Interpreter:
             current = current.base
         return current, indices
 
+    def _resolve_function_name(self, name: str) -> Optional[str]:
+        if name in self.functions:
+            return name
+        if self.call_stack:
+            current = self.call_stack[-1]
+            if "." in current.name:
+                module_prefix = current.name.split(".", 1)[0]
+                candidate = f"{module_prefix}.{name}"
+                if candidate in self.functions:
+                    return candidate
+        return None
+
+    def _function_ref_from_name(self, name: str) -> Optional[FunctionRef]:
+        func_name = self._resolve_function_name(name)
+        if func_name is not None:
+            return FunctionRef(name=func_name, function=self.functions[func_name], builtin=False)
+        if name in self.builtins.table:
+            return FunctionRef(name=name, function=None, builtin=True)
+        return None
+
     def _evaluate_expression(self, expression: Expression, env: Environment) -> Value:
         if isinstance(expression, Literal):
             return Value(expression.literal_type, expression.value)
@@ -2971,12 +3054,9 @@ class Interpreter:
                 return env.get(expression.name)
             except ASMRuntimeError as err:
                 err.location = expression.location
-                if expression.name == "INPUT":
-                    self._emit_event("before_call", self, "INPUT", [], env, expression.location)
-                    result = self.builtins.invoke(self, "INPUT", [], [], env, expression.location)
-                    self._emit_event("after_call", self, "INPUT", result, env, expression.location)
-                    self._log_step(rule="INPUT", location=expression.location, extra={"args": [], "result": result.value})
-                    return result
+                fn_ref = self._function_ref_from_name(expression.name)
+                if fn_ref is not None:
+                    return Value(TYPE_FN, fn_ref)
                 raise
         if isinstance(expression, CallExpression):
             if expression.name == "IMPORT":
@@ -3027,17 +3107,7 @@ class Interpreter:
                             rewrite_rule=expression.name,
                         )
                     keyword_args[arg.name] = value
-            func_name: Optional[str] = None
-            if expression.name in self.functions:
-                func_name = expression.name
-            else:
-                if self.call_stack:
-                    current = self.call_stack[-1]
-                    if "." in current.name:
-                        module_prefix = current.name.split(".", 1)[0]
-                        candidate = f"{module_prefix}.{expression.name}"
-                        if candidate in self.functions:
-                            func_name = candidate
+            func_name = self._resolve_function_name(expression.name)
             if func_name is not None:
                 self._log_step(
                     rule="CALL",
@@ -3055,51 +3125,105 @@ class Interpreter:
                     keyword_args,
                     expression.location,
                 )
-            try:
-                if keyword_args:
-                    if expression.name in {"READFILE", "WRITEFILE"}:
-                        allowed = {"coding"}
-                        unexpected = [k for k in keyword_args if k not in allowed]
-                        if unexpected:
-                            raise ASMRuntimeError(
-                                f"Unexpected keyword arguments: {', '.join(sorted(unexpected))}",
-                                location=expression.location,
-                                rewrite_rule=expression.name,
-                            )
-                        if "coding" in keyword_args:
-                            positional_args.append(keyword_args.pop("coding"))
-                    if keyword_args:
+            arg_nodes = [a.expression for a in expression.args]
+            if expression.name not in self.builtins.table:
+                env_found = env._find_env(expression.name)
+                if env_found is not None:
+                    candidate = env_found.values[expression.name]
+                    if candidate.type != TYPE_FN or not isinstance(candidate.value, FunctionRef):
                         raise ASMRuntimeError(
-                            f"{expression.name} does not accept keyword arguments",
+                            f"Identifier '{expression.name}' is not callable",
                             location=expression.location,
-                            rewrite_rule=expression.name,
+                            rewrite_rule="CALL",
                         )
-                arg_nodes = [a.expression for a in expression.args]
-                self._emit_event("before_call", self, expression.name, positional_args, env, expression.location)
-                result = self.builtins.invoke(self, expression.name, positional_args, arg_nodes, env, expression.location)
-            except ASMRuntimeError:
-                self._log_step(
-                    rule=expression.name,
-                    location=expression.location,
-                    extra={
-                        "args": [a.value for a in positional_args],
-                        "keyword": {k: v.value for k, v in keyword_args.items()},
-                        "status": "error",
-                    },
+                    return self._call_function_ref(
+                        candidate.value,
+                        positional_args,
+                        keyword_args,
+                        arg_nodes,
+                        env,
+                        expression.location,
+                    )
+            return self._invoke_builtin(expression.name, positional_args, keyword_args, arg_nodes, env, expression.location)
+        raise ASMRuntimeError("Unsupported expression", location=expression.location)
+
+    def _invoke_builtin(
+        self,
+        name: str,
+        positional_args: List[Value],
+        keyword_args: Dict[str, Value],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        if keyword_args:
+            if name in {"READFILE", "WRITEFILE"}:
+                allowed = {"coding"}
+                unexpected = [k for k in keyword_args if k not in allowed]
+                if unexpected:
+                    raise ASMRuntimeError(
+                        f"Unexpected keyword arguments: {', '.join(sorted(unexpected))}",
+                        location=location,
+                        rewrite_rule=name,
+                    )
+                if "coding" in keyword_args:
+                    positional_args.append(keyword_args.pop("coding"))
+            if keyword_args:
+                raise ASMRuntimeError(
+                    f"{name} does not accept keyword arguments",
+                    location=location,
+                    rewrite_rule=name,
                 )
-                raise
-            self._emit_event("after_call", self, expression.name, result, env, expression.location)
+        try:
+            self._emit_event("before_call", self, name, positional_args, env, location)
+            result = self.builtins.invoke(self, name, positional_args, arg_nodes, env, location)
+        except ASMRuntimeError:
             self._log_step(
-                rule=expression.name,
-                location=expression.location,
+                rule=name,
+                location=location,
                 extra={
                     "args": [a.value for a in positional_args],
                     "keyword": {k: v.value for k, v in keyword_args.items()},
-                    "result": result.value,
+                    "status": "error",
                 },
             )
-            return result
-        raise ASMRuntimeError("Unsupported expression", location=expression.location)
+            raise
+        self._emit_event("after_call", self, name, result, env, location)
+        self._log_step(
+            rule=name,
+            location=location,
+            extra={
+                "args": [a.value for a in positional_args],
+                "keyword": {k: v.value for k, v in keyword_args.items()},
+                "result": result.value,
+            },
+        )
+        return result
+
+    def _call_function_ref(
+        self,
+        ref: FunctionRef,
+        positional_args: List[Value],
+        keyword_args: Dict[str, Value],
+        arg_nodes: List[Expression],
+        env: Environment,
+        location: SourceLocation,
+    ) -> Value:
+        if ref.builtin:
+            return self._invoke_builtin(ref.name, positional_args, keyword_args, arg_nodes, env, location)
+        if ref.function is None:
+            raise ASMRuntimeError("Invalid function reference", location=location, rewrite_rule="CALL")
+        self._log_step(
+            rule="CALL",
+            location=location,
+            extra={
+                "function": ref.display_name(),
+                "positional": [a.value for a in positional_args],
+                "keyword": {k: v.value for k, v in keyword_args.items()},
+            },
+        )
+        self._emit_event("before_call", self, ref.display_name(), positional_args, env, location)
+        return self._call_user_function(ref.function, positional_args, keyword_args, location)
 
     def _call_user_function(
         self,

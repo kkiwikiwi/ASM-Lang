@@ -45,7 +45,7 @@ This document specifies an imperative programming language with a binary integer
 
 ## 1. Overview
 
-The language is a familiar statement-based, imperative language. Programs consist of variable declarations via assignment, expressions, and control-flow constructs such as `IF`, `ELSIF`, `ELSE`, `WHILE`, and `FOR`. ASM-Lang has four runtime data types: binary integers (`INT`), binary floating-point numbers (`FLT`, IEEE754), strings (`STR`), and non-scalar tensors (`TNS`). Identifiers, function parameters, and return values are statically typed; the type of every symbol must be declared when it is first introduced. Computation proceeds by evaluating expressions and executing statements in sequence, with explicit constructs for branching and looping. Input and output are modeled through built-in operators, in particular `INPUT` and `PRINT`.
+The language is a familiar statement-based, imperative language. Programs consist of variable declarations via assignment, expressions, and control-flow constructs such as `IF`, `ELSIF`, `ELSE`, `WHILE`, and `FOR`. ASM-Lang has five runtime data types: binary integers (`INT`), binary floating-point numbers (`FLT`, IEEE754), strings (`STR`), non-scalar tensors (`TNS`), and function references (`FN`). Identifiers, function parameters, and return values are statically typed; the type of every symbol must be declared when it is first introduced. Computation proceeds by evaluating expressions and executing statements in sequence, with explicit constructs for branching and looping. Input and output are modeled through built-in operators, in particular `INPUT` and `PRINT`.
 
 The interpreter compiles source code into a single initial configuration (the seed state), which includes the program code, an empty variable environment, and an initial I/O history. It then advances execution by repeatedly applying a single, fixed small-step transition function that is independent of the particular program. A disassembler and log view expose all intermediate states so that every step and every control-flow decision is inspectable and replay-able.
 
@@ -93,7 +93,7 @@ This deliberately-permissive identifier character set preserves an unambiguous l
 
 ## 3. Data Model
 
-ASM-Lang supports four runtime data types: binary integers, binary floating-point numbers, strings, and non-scalar tensors.
+ASM-Lang supports five runtime data types: binary integers, binary floating-point numbers, strings, non-scalar tensors, and function references.
 
 Binary integer literal: an unsigned non-empty sequence of `{0,1}` (for example, `0`, `1`, `1011`), or a signed literal formed by a leading `-` (the dash is part of the literal, not an operator) followed by optional spaces, tabs, or carriage returns and then a non-empty sequence of `{0,1}`. A `-` that does not immediately introduce a literal is a syntax error.
 
@@ -113,15 +113,17 @@ Tensor literal: a non-empty bracketed collection of expressions. Each pair of ma
 - `[[0,1,10],[0,10,100]]` has shape `[10,11]`.
 - `[[[0,1,10],[1,10,100]]]` has shape `[1,10,11]`.
 
-Expressions inside a tensor literal may themselves evaluate to `INT`, `STR`, or `TNS`. If an element expression evaluates to a tensor value, it occupies a single position and does not contribute additional dimensions; only the explicit bracket structure determines the shape. A tensor literal that mixes sub-brackets of differing lengths is invalid (for example, `[[0,0,0],[1,1]]`).
+Expressions inside a tensor literal may themselves evaluate to `INT`, `FLT`, `STR`, `TNS`, or `FN`. If an element expression evaluates to a tensor value, it occupies a single position and does not contribute additional dimensions; only the explicit bracket structure determines the shape. A tensor literal that mixes sub-brackets of differing lengths is invalid (for example, `[[0,0,0],[1,1]]`).
 
 Tensor values carry a fixed shape (dimension count and length per dimension). Each location in a tensor is statically typed by the value it first receives; attempting to write a different type to that location is a runtime error. Tensors are indexed with one-based indices. Negative indices address from the end of the corresponding dimension (for example, index -1 is the last element of that dimension); index 0 is invalid. Tensors may be re-assigned in two ways: binding a new tensor to the variable name, or writing through an index such as `tensor[dim1,...,dimN] = expr`. The latter mutates the existing tensor value in place at the indexed location and does not construct a new tensor object.
 
 All other tensor operations are non-mutating: tensor literals and tensor-valued built-ins produce new tensor values rather than mutating existing ones. Because indexed assignment mutates a tensor object, if the same tensor value is aliased (bound to multiple identifiers, passed as an argument, or stored inside another tensor), all aliases observe the mutation.
 
-Every runtime value has a static type: `INT`, `FLT`, `STR`, or `TNS`. Integers are conceptually unbounded mathematical integers. Floats are IEEE754 binary floating-point numbers. Strings are byte strings of ASCII characters. Tensors are non-scalar aggregates whose elements may be `INT`, `FLT`, `STR`, or `TNS`.
+Every runtime value has a static type: `INT`, `FLT`, `STR`, `TNS`, or `FN`. Integers are conceptually unbounded mathematical integers. Floats are IEEE754 binary floating-point numbers. Strings are byte strings of ASCII characters. Tensors are non-scalar aggregates whose elements may be `INT`, `FLT`, `STR`, `TNS`, or `FN`.
 
-When a Boolean interpretation is required, `INT` treats 0 as false and non-zero as true; `FLT` treats 0.0 as false and any non-zero value as true; `STR` treats the empty string as false and any non-empty string as true; `TNS` is true if any contained element is true by these rules, otherwise false. Control-flow conditions (`IF`, `ELSIF`, `WHILE`) and `ASSERT` convert strings to integers using the same rules as the `INT` built-in; tensors are first reduced to their Boolean truth value (1 or 0).
+Function references (`FN`) are first-class values that refer to user-defined or built-in functions. A function reference is produced by using a function identifier as an expression (for example, `FN: op = ADD` or `FN: f = helper`). Function references may be stored in variables, tensors, passed as arguments, and returned from functions. Equality compares function references by identity for user-defined functions and by name for built-ins.
+
+When a Boolean interpretation is required, `INT` treats 0 as false and non-zero as true; `FLT` treats 0.0 as false and any non-zero value as true; `STR` treats the empty string as false and any non-empty string as true; `TNS` is true if any contained element is true by these rules, otherwise false; `FN` is always true. Control-flow conditions (`IF`, `ELSIF`, `WHILE`) and `ASSERT` convert strings to integers using the same rules as the `INT` built-in; tensors are first reduced to their Boolean truth value (1 or 0).
 
 `INT` and `FLT` are not interoperable: no implicit conversion occurs. Operators that accept both types require that all numeric arguments have the same numeric type.
 
@@ -131,13 +133,13 @@ A program consists of zero or more statements separated by newlines. Each top-le
 
 Blocks group one or more statements and are enclosed in curly brackets: `{ statement1 ... statementN }`. Curly braces must match (that is, `{` closes with `}`). Blocks serve as the bodies of control-flow constructs and functions.
 
-Assignments have the syntax `TYPE : identifier = expression` on first use, where TYPE is `INT`, `STR`, or `TNS`. Spaces around the colon and equals sign are optional. Subsequent assignments to an existing identifier may omit the type but must preserve the original type. Variables are deallocated only when `DEL(identifier)` is executed.
+Assignments have the syntax `TYPE : identifier = expression` on first use, where TYPE is `INT`, `FLT`, `STR`, `TNS`, or `FN`. Spaces around the colon and equals sign are optional. Subsequent assignments to an existing identifier may omit the type but must preserve the original type. Variables are deallocated only when `DEL(identifier)` is executed.
 
 Tensor elements can be reassigned with the indexed form `identifier[i1,...,iN] = expression`. The base must be a previously-declared `TNS` binding. The indices must match the tensor's dimensionality, follow the same one-based/negative-index rules as ordinary indexing, and must reference anexisting position. The element's original type cannot change: attempting to store a different type at that position is a runtime error. Indexed assignment mutates the `TNS`.
 
 The language provides `IF`, `ELSIF`, and `ELSE` constructs for conditional execution. An `IF` statement has the general form `IF(condition){ block }`. Optional chained branches may follow: one or more `ELSIF(condition){ block }` clauses and an optional terminal `ELSE{ block }` clause. An `ELSIF` or `ELSE` must immediately follow an `IF` or another `ELSIF`; otherwise it is a syntax error. At most one `ELSE` may appear in a given chain. Evaluation proceeds by first evaluating the condition of the initial `IF`. If it is non-zero, the associated block executes and the rest of the chain is skipped. Otherwise, the conditions of subsequent `ELSIF` clauses are evaluated in order until one is non-zero; its block then executes and the chain terminates. If no `IF` or `ELSIF` condition is satisfied and an `ELSE` is present, the `ELSE` block executes; if there is no `ELSE`, no block in the chain executes.
 
-Conditions accept `INT`, `STR`, or `TNS`. `STR` conditions are first converted to `INT` using the `INT` built-in rules (empty -> 0; binary string -> that integer; other non-empty -> 1) before truthiness is checked. A `TNS` condition is true if any of its elements is true by the `INT`/`STR` truthiness rules.
+Conditions accept `INT`, `FLT`, `STR`, `TNS`, or `FN`. `STR` conditions are first converted to `INT` using the `INT` built-in rules (empty -> 0; binary string -> that integer; other non-empty -> 1) before truthiness is checked. A `TNS` condition is true if any of its elements is true by the `INT`/`STR` truthiness rules.
 
 Loops are provided via `WHILE` and `FOR`. A `WHILE` loop has the form `WHILE(condition){ block }`. On each iteration, the condition is evaluated; if it is non-zero, the block executes and control returns to the start of the loop to evaluate the condition again. If the condition evaluates to zero, the loop terminates and execution continues with the next statement.
 
@@ -150,17 +152,17 @@ CONTINUE statement: The language provides a statement form `CONTINUE()` that, wh
 
 ## 5. Functions
 
-Functions are defined using the `FUNC` keyword with explicit parameter and return types. The canonical positional-only form is `FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }`, where each `Tk` and `R` is `INT`, `STR`, or `TNS`. Parameters may also declare a call-time default value using `Tk:arg=expr`. A parameter without a default is positional; a parameter with a default is keyword-capable. Positional parameters must appear before any parameters with defaults. Defining a function binds `name` to a callable body with the specified typed formal parameters. Function names must not conflict with the names of built-in operators or functions.
+Functions are defined using the `FUNC` keyword with explicit parameter and return types. The canonical positional-only form is `FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }`, where each `Tk` and `R` is `INT`, `FLT`, `STR`, `TNS`, or `FN`. Parameters may also declare a call-time default value using `Tk:arg=expr`. A parameter without a default is positional; a parameter with a default is keyword-capable. Positional parameters must appear before any parameters with defaults. Defining a function binds `name` to a callable body with the specified typed formal parameters. Function names must not conflict with the names of built-in operators or functions.
 
-A user-defined function is called with the same syntax as a built-in: `name(expr1, expr2, ..., exprN)`. Calls may supply zero or more positional arguments (left-to-right) followed by zero or more keyword arguments of the form `param=expr`. Keyword arguments can only appear after all positional arguments. At the call site, every positional argument is bound to the next positional parameter; keyword arguments must match the name of a parameter that declared a default value. Duplicate keyword names, supplying too many positional arguments, or providing a keyword for an unknown parameter are runtime errors. If a keyword-capable parameter is omitted from the call, its default expression is evaluated at call time in the function's lexical environment after earlier parameters have been bound. The evaluated default must match the parameter's declared type. Built-in functions do not accept keyword arguments except that `READFILE` and `WRITEFILE` allow a single optional `coding=` keyword; attempting to pass any other keyword raises a runtime error. Arguments are evaluated left-to-right. The function body executes in a new environment (activation record) that closes over the defining environment. If a `RETURN(v)` statement is executed, the function terminates immediately and yields `v`; the returned value must match the declared return type. If control reaches the end of the body without `RETURN`, the function returns a default value of the declared return type (0 for `INT`, "" for `STR`). Functions whose return type is
-`TNS` must execute an explicit `RETURN` with a tensor value; reaching the end of the body without returning is a runtime error for `TNS`-returning functions.
+A user-defined function is called with the same syntax as a built-in: `name(expr1, expr2, ..., exprN)`. Calls may supply zero or more positional arguments (left-to-right) followed by zero or more keyword arguments of the form `param=expr`. Keyword arguments can only appear after all positional arguments. At the call site, every positional argument is bound to the next positional parameter; keyword arguments must match the name of a parameter that declared a default value. Duplicate keyword names, supplying too many positional arguments, or providing a keyword for an unknown parameter are runtime errors. If a keyword-capable parameter is omitted from the call, its default expression is evaluated at call time in the function's lexical environment after earlier parameters have been bound. The evaluated default must match the parameter's declared type. Built-in functions do not accept keyword arguments except that `READFILE` and `WRITEFILE` allow a single optional `coding=` keyword; attempting to pass any other keyword raises a runtime error. Arguments are evaluated left-to-right. If the identifier in call position is bound to a function reference (`FN`), the referenced function is invoked using the same call syntax. The function body executes in a new environment (activation record) that closes over the defining environment. If a `RETURN(v)` statement is executed, the function terminates immediately and yields `v`; the returned value must match the declared return type. If control reaches the end of the body without `RETURN`, the function returns a default value of the declared return type (0 for `INT`, 0.0 for `FLT`, "" for `STR`). Functions whose return type is
+`TNS` or `FN` must execute an explicit `RETURN` with a value of the declared type; reaching the end of the body without returning is a runtime error for `TNS`/`FN`-returning functions.
 
 Built-in operators and functions can be viewed as pre-defined functions provided by the runtime environment. User-defined functions share the same call syntax and are distinguished only by their names and bodies. Because of the shared namespace, a user-defined function is not permitted to use any name already reserved for a built-in. Attempting to violate this will raise an exception.
 
 
 ## 6. Variables and Memory Model
 
-A variable is created only when it is first assigned with an explicit type annotation of the form `TYPE : name = expression`, where TYPE is `INT`, `STR`, or `TNS`. For example: `INT` : counter = 0` or `STR` : message = "hi"`. Subsequent assignments to the same name must match the declared type and may omit the type annotation (`counter = ADD(counter,1)`). Assigning to an undeclared name without a type annotation is a runtime error. A variable exists until `DEL(name)` is executed. Referencing a variable that has never been declared, or that has been deleted, is a runtime error.
+A variable is created only when it is first assigned with an explicit type annotation of the form `TYPE : name = expression`, where TYPE is `INT`, `FLT`, `STR`, `TNS`, or `FN`. For example: `INT` : counter = 0` or `STR` : message = "hi"`. Subsequent assignments to the same name must match the declared type and may omit the type annotation (`counter = ADD(counter,1)`). Assigning to an undeclared name without a type annotation is a runtime error. A variable exists until `DEL(name)` is executed. Referencing a variable that has never been declared, or that has been deleted, is a runtime error.
 
 The language assumes at least a global typed environment mapping identifiers to (type, value) pairs. Function calls create new environments for parameters and local variables, as described in Section 6.2; the precise details of name resolution depend on the chosen scoping rules.
 
@@ -287,7 +289,7 @@ Notes:
 
 Example invocations (illustrative):
 - File mode: `asm-lang program.asmln`
-- Source-string mode: `asm-lang -source "foo = INPUT\nPRINT(foo)" -verbose`
+- Source-string mode: `asm-lang -source "STR: foo = INPUT()\nPRINT(foo)" -verbose`
 - With extensions (file mode): `asm-lang myext.py program.asmln`
 - With pointer file: `asm-lang extensions.asmxt program.asmln`
 
@@ -314,7 +316,7 @@ Notes and examples:
 
 This section lists built-in functions, operators and statement signatures, along with a (somewhat) brief description of their behaviour.
 
-Type notation: union signatures such as `INT|STR` restrict arguments to the listed types. `ANY` means "any runtime value"; in the base language this includes `INT`, `STR`, and `TNS`, and when extensions are enabled it also includes extension-defined types (unless a signature explicitly narrows the set).
+Type notation: union signatures such as `INT|STR` restrict arguments to the listed types. `ANY` means "any runtime value"; in the base language this includes `INT`, `FLT`, `STR`, `TNS`, and `FN`, and when extensions are enabled it also includes extension-defined types (unless a signature explicitly narrows the set).
 
 ### Expression syntax
 
@@ -324,7 +326,7 @@ Tensor indexing uses the expression form `tensor[i1, i2, ..., iN]`. The number o
 
 ### Function / Operator Signatures (expression position)
 - `INPUT():STR` or `INPUT(STR: s):STR` ; returns a `STR` from the input stream; use `INT` to coerce to an integer when needed. The interpreter prints the prompt inline (so a REPL or other output sink can display it) before reading a line of input. The I/O event is recorded for replay and, when a prompt was supplied, the recorded event includes the prompt text.
-- `PRINT(INT|STR: a1, INT|STR: a2, ..., INT|STR: aN):INT` ; prints `INT`/`STR` arguments (side-effect), tensors are rejected; returns `INT` 0
+- `PRINT(INT|FLT|STR|FN: a1, INT|FLT|STR|FN: a2, ..., INT|FLT|STR|FN: aN):INT` ; prints `INT`/`FLT`/`STR`/`FN` arguments (side-effect), tensors are rejected; returns `INT` 0
 - `RUN(STR: s)` ; Run a string as an ASM-Lang program within the current environment;
 - `UPPER(STR: s):STR` ; `STR` -> uppercase `STR`; error if `s` is `INT`
 - `LOWER(STR: s):STR` ; `STR` -> lowercase `STR`; error if `s` is `INT`
@@ -345,6 +347,7 @@ Tensor indexing uses the expression form `tensor[i1, i2, ..., iN]`. The number o
 - `ISINT(SYMBOL: x):INT` ; returns `1` if the identifier `x` exists and is of type `INT`, otherwise returns `0`. The argument must be an identifier; supplying any other expression is a runtime error.
 - `ISSTR(SYMBOL: x):INT` ; returns `1` if the identifier `x` exists and is of type `STR`, otherwise returns `0`. The argument must be an identifier; supplying any other expression is a runtime error.
 - `ISTNS(SYMBOL: x):INT` ; returns `1` if the identifier `x` exists and is of type `TNS`, otherwise returns `0`. The argument must be an identifier; supplying any other expression is a runtime error.
+- `ISFN(SYMBOL: x):INT` ; returns `1` if the identifier `x` exists and is of type `FN`, otherwise returns `0`. The argument must be an identifier; supplying any other expression is a runtime error.
 - `SLEN(STR: s):INT` returns the length of the supplied `STR` in characters as an `INT`. The argument must be a `STR`; passing an `INT` raises a runtime error.
 - `ILEN(INT: n):INT` returns the length in binary digits of the absolute value of the supplied `INT`. `ILEN(0)` returns 1. The argument must be an `INT`; passing a `STR` raises a runtime error.
 
@@ -478,7 +481,7 @@ Tensor indexing uses the expression form `tensor[i1, i2, ..., iN]`. The number o
 - `IF(condition){ block }` (optional `ELSIF(condition){ block }` ... `ELSE{ block }`)
 - `WHILE(condition){ block }`
 - `FOR(counter, INT: target){ block }` ; `counter` initialized to 0, loop until counter >= target
-`FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }` ; typed function definition with return type R (`INT`, `STR`, or `TNS`); optional defaults use `Tk:arg=expr` and must appear only after all positional parameters. Functions with return type `TNS` must explicitly execute `RETURN(value)`; there is no implicit default tensor value.
+`FUNC name(T1:arg1, T2:arg2, ..., TN:argN):R{ block }` ; typed function definition with return type R (`INT`, `FLT`, `STR`, `TNS`, or `FN`); optional defaults use `Tk:arg=expr` and must appear only after all positional parameters. Functions with return type `TNS` or `FN` must explicitly execute `RETURN(value)`; there is no implicit default value for these types.
 - `RETURN(ANY: a)` ; return from function with value `a`
 - `POP(SYMBOL: x)` — Convenience statement combining `RETURN` and `DEL`: when executed inside a function body it retrieves the current value of the identifier `x`, deletes the binding `x` from the environment (so subsequent references are an error), and returns the retrieved value to the caller. Using `POP` outside of a function is a runtime error.
 - `BREAK(INT: n)` ; break out of the innermost `n` enclosing loops; raises a runtime error if `n` ≤ 0 or if `n` is greater than the current loop nesting depth

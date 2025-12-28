@@ -26,7 +26,7 @@ FUNC RUN_TESTS():INT{
     PRINT("AES-CBC tests passed.")
 
     # RSA round-trip (OAEP/SHA-256)
-    TNS: keys = crypto.RSA_KEYGEN(10000000000)
+    TNS: keys = crypto.RSA_KEYGEN(100000000000)
     STR: pub = keys[1]
     STR: priv = keys[10]
     TNS: msg = crypto.HEX_TO_BYTES("48656c6c6f")
@@ -35,6 +35,12 @@ FUNC RUN_TESTS():INT{
     STR: dec_hex = crypto.BYTES_TO_HEX(dec)
     ASSERT(EQ(dec_hex, "48656c6c6f"))
     PRINT("RSA tests passed.")
+
+    # Best-effort zeroing for byte buffers
+    TNS: wipe = crypto.HEX_TO_BYTES("ffff")
+    crypto.ZERO_BYTES(wipe)
+    ASSERT(EQ(crypto.BYTES_TO_HEX(wipe), "0000"))
+    PRINT("Zeroing tests passed.")
 
     # Random bytes + GC sanity checks
     TNS: rnd = crypto.CRYPTO_RANDOM(10000)
